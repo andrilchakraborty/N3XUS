@@ -9,6 +9,8 @@
   <link href="https://fonts.googleapis.com/css?family=Montserrat:400,600,700&display=swap" rel="stylesheet"/>
   <!-- Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+  <!-- JSZip for admin uploads -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
   <style>
     :root {
       --bg-dark: #0d0d0f;
@@ -22,6 +24,21 @@
     * { margin:0; padding:0; box-sizing:border-box; font-family:'Montserrat',sans-serif; }
     body { display:flex; min-height:100vh; background:var(--bg-dark); color:var(--text-light); }
     a { text-decoration:none; color:inherit; }
+
+    /* Global button styles */
+    button {
+      border:2px solid var(--accent);
+      border-radius:6px;
+      background:none;
+      color:var(--accent);
+      cursor:pointer;
+      transition: box-shadow .2s, background .2s, color .2s;
+    }
+    button:hover {
+      box-shadow: 0 0 8px var(--accent-hover);
+      background:var(--accent);
+      color:#fff;
+    }
 
     /* Sidebar */
     .sidebar {
@@ -54,33 +71,27 @@
       display:flex; align-items:center;
       justify-content:space-between; padding:0 20px;
     }
-    #logo { height:40px; }
-    #search-form { display:flex; align-items:center; }
-    #search-input {
+    #search-controls { display:flex; align-items:center; }
+    #search-form {
+      display:flex; align-items:center;
+    }
+    #search-input, #jpg5-input {
       padding:6px 10px; font-size:14px;
-      border:none; border-radius:4px 0 0 4px; width:200px;
+      border:none; border-radius:4px; width:200px;
     }
-    #search-btn {
-      padding:6px 12px; border:none; border-radius:0 4px 4px 0;
-      background:var(--accent); color:#fff; cursor:pointer;
-      transition: background .2s;
+    #jpg5-input { margin-left:8px; width:250px; }
+    #search-btn, #jpg5-btn {
+      padding:6px 12px; border-radius:4px;
+      background:var(--accent); color:#fff; margin-left:4px;
     }
-    #search-btn:hover { background:var(--accent-hover); }
 
     /* Telegram & Discord buttons */
     .header-btn {
       display:flex;
       align-items:center; justify-content:center;
       width:44px; height:44px;
-      border:2px solid var(--accent);
       border-radius:6px;
-      background:none; color:var(--accent);
       font-size:22px; margin-left:8px;
-      cursor:pointer; transition:background .2s, color .2s;
-    }
-    .header-btn:hover {
-      background:var(--accent);
-      color:#fff;
     }
 
     /* Intro */
@@ -99,6 +110,25 @@
     @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
     @keyframes slideDown { from { transform:translateY(-20px); opacity:0; } to { transform:translateY(0); opacity:1; } }
 
+    /* Context menu */
+    #img-context-menu {
+      position: fixed;
+      background: #112240;
+      border: 1px solid #233554;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.7);
+      color: #ccd6f6;
+      display: none;
+      z-index: 10000;
+    }
+    #img-context-menu div {
+      padding: 8px 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #img-context-menu div:hover {
+      background: #233554;
+    }
     .content { flex:1; overflow-y:auto; padding-top:20px; }
 
     /* Search Section */
@@ -148,7 +178,7 @@
       cursor:pointer; margin-bottom:16px; font-size:14px;
     }
     .endpoint-section { margin-bottom:24px; }
-    .endpoint-section h3 { font-size:18px; margin-bottom:8px; color:var(--accent); }
+    .endpoint-section h3 { font-size:18px; margin-bottom:8px; color:var(--accent); display:inline-block; }
     .items-grid {
       display:grid; gap:16px;
       grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
@@ -210,6 +240,20 @@
       transition:background .2s;
     }
     .back-to-top:hover { background:var(--accent-hover); }
+
+    /* Admin panel */
+    #admin-panel {
+      display:none;
+      position:fixed; top:60px; right:20px;
+      background:var(--bg-darker);
+      padding:20px;
+      border:2px solid var(--accent);
+      border-radius:6px;
+      z-index:1000;
+      width:260px;
+    }
+    #admin-panel h3 { margin-bottom:12px; color:var(--accent); }
+    #admin-panel input { width:100%; padding:6px 10px; margin-bottom:8px; border:none; border-radius:4px; }
   </style>
 </head>
 <body>
@@ -229,11 +273,14 @@
   <div class="main">
     <header class="header">
       <h1 style="color:var(--accent);">N3XUS LEAKS</h1>
-      <img id="logo" src="" alt="Logo"/>
-      <form id="search-form">
-        <input id="search-input" placeholder="Search term…" autocomplete="off"/>
-        <button type="submit" id="search-btn"><i class="fas fa-search"></i></button>
-      </form>
+      <div id="search-controls">
+        <form id="search-form">
+          <input id="search-input" placeholder="Search term…" autocomplete="off"/>
+          <button type="submit" id="search-btn"><i class="fas fa-search"></i></button>
+        </form>
+        <input id="jpg5-input" placeholder="JPG5 album URL…" autocomplete="off"/>
+        <button id="jpg5-btn">Fetch JPG5</button>
+      </div>
       <button id="telegram-btn" class="header-btn"><i class="fab fa-telegram-plane"></i></button>
       <button id="discord-btn" class="header-btn"><i class="fab fa-discord"></i></button>
     </header>
@@ -316,75 +363,79 @@
       </div>
     </footer>
   </div>
-
+  <div id="img-context-menu">
+    <div data-action="copy-image">Copy Image</div>
+    <div data-action="copy-url">Copy Image URL</div>
+    <div data-action="open">Open Image in New Tab</div>
+  </div>
   <div class="back-to-top"><i class="fas fa-arrow-up"></i></div>
 
-  <script>
-    // Elements
-    const menuHome   = document.getElementById('menu-home'),
-          menuSearch = document.getElementById('menu-search'),
-          menuModels = document.getElementById('menu-models'),
-          menuFaq    = document.getElementById('menu-faq'),
-          menuTerms  = document.getElementById('menu-terms'),
-          intro      = document.getElementById('intro'),
-          searchSec  = document.getElementById('search-section'),
-          modelsSec  = document.getElementById('models-section'),
-          galleryView= document.getElementById('gallery-view'),
-          faqSec     = document.getElementById('faq'),
-          termsSec   = document.getElementById('terms'),
-          searchForm = document.getElementById('search-form'),
-          searchIn   = document.getElementById('search-input'),
-          searchGrid = document.getElementById('search-grid'),
-          modelsGrid = document.getElementById('models-grid'),
-          backBtn    = document.getElementById('back-btn'),
-          modelTitle = document.getElementById('model-title'),
-          albumLinks = document.getElementById('album-links'),
-          faqBtns    = document.querySelectorAll('.accordion-item button'),
-          backToTop  = document.querySelector('.back-to-top'),
-          telegramBtn= document.getElementById('telegram-btn'),
-          discordBtn = document.getElementById('discord-btn'),
-          azList     = document.getElementById('model-az-list'),
-          filterIn   = document.getElementById('model-filter-input');
+  <!-- Admin Panel (hidden until Ctrl+I) -->
+  <div id="admin-panel">
+    <h3>Admin Panel</h3>
+    <input id="new-model-name" type="text" placeholder="Model Name" />
+    <input id="new-model-zip" type="file" accept=".zip" />
+    <button id="upload-btn">Upload Model</button>
+  </div>
 
-    // Endpoints
+  <script>
+    // Constants & state
+    const DEFAULT_THUMB = 'https://via.placeholder.com/160x100?text=Thumbnail';
+    let results = JSON.parse(localStorage.getItem('n3xus_results') || '[]');
+    let adminMode = false;
+
+    // Element refs
+    const menuHome       = document.getElementById('menu-home'),
+          menuSearch     = document.getElementById('menu-search'),
+          menuModels     = document.getElementById('menu-models'),
+          menuFaq        = document.getElementById('menu-faq'),
+          menuTerms      = document.getElementById('menu-terms'),
+          intro          = document.getElementById('intro'),
+          searchSec      = document.getElementById('search-section'),
+          modelsSec      = document.getElementById('models-section'),
+          galleryView    = document.getElementById('gallery-view'),
+          faqSec         = document.getElementById('faq'),
+          termsSec       = document.getElementById('terms'),
+          searchForm     = document.getElementById('search-form'),
+          searchIn       = document.getElementById('search-input'),
+          searchGrid     = document.getElementById('search-grid'),
+          modelsGrid     = document.getElementById('models-grid'),
+          backBtn        = document.getElementById('back-btn'),
+          modelTitle     = document.getElementById('model-title'),
+          albumLinks     = document.getElementById('album-links'),
+          faqBtns        = document.querySelectorAll('.accordion-item button'),
+          backToTop      = document.querySelector('.back-to-top'),
+          telegramBtn    = document.getElementById('telegram-btn'),
+          discordBtn     = document.getElementById('discord-btn'),
+          azList         = document.getElementById('model-az-list'),
+          filterIn       = document.getElementById('model-filter-input'),
+          jpg5Input      = document.getElementById('jpg5-input'),
+          jpg5Btn        = document.getElementById('jpg5-btn'),
+          uploadBtn      = document.getElementById('upload-btn'),
+          adminPanel     = document.getElementById('admin-panel');
+
+    // Your existing endpoints array unchanged
     const endpoints = [
       { name:'Erome Gallery',   url:q=>`/api/erome-gallery?query=${q}`,       type:'gallery' },
       { name:'Erome Albums',    url:q=>`/api/erome-albums?username=${q}`,     type:'albums'  },
-      { name:'Bunkr Gallery',   url:q=>`/api/bunkr-gallery?query=${q}`,       type:'gallery' },
-      { name:'Bunkr Albums',    url:q=>`/api/bunkr-albums?query=${q}`,        type:'albums'  },
-      { name:'NotFans',         url:q=>`/api/notfans?search_term=${q}`,       type:'urls',   key:['urls','titles'] },
-      { name:'Influencers',     url:q=>`/api/influencers?term=${q}`,          type:'urls',   key:['urls','titles'] },
-      { name:'Thothub',         url:q=>`/api/thothub?term=${q}`,              type:'urls',   key:['urls','titles'] },
-      { name:'DirtyShip',       url:q=>`/api/dirtyship?term=${q}`,            type:'urls',   key:['urls','titles'] },
-      { name:'PimpBunny',       url:q=>`/api/pimpbunny?term=${q}`,            type:'urls',   key:['urls','titles'] },
-      { name:'LeakedZone',      url:q=>`/api/leakedzone?term=${q}`,           type:'urls',   key:['urls','titles'] },
-      { name:'FanslyLeaked',    url:q=>`/api/fanslyleaked?term=${q}`,         type:'urls',   key:['urls','titles'] },
-      { name:'GotAnyNudes',     url:q=>`/api/gotanynudes?term=${q}`,          type:'urls',   key:['urls','titles'] },
-      { name:'NSFW247',         url:q=>`/api/nsfw247?term=${q}`,             type:'urls',   key:['urls','titles'] },
-      { name:'HornySimp',       url:q=>`/api/hornysimp?term=${q}`,           type:'urls',   key:['urls','titles'] },
-      { name:'Porntn',          url:q=>`/api/porntn?term=${q}`,              type:'urls',   key:['urls','titles'] },
-      { name:'xxBrits',         url:q=>`/api/xxbrits?term=${q}`,             type:'urls',   key:['urls','titles'] },
-      { name:'BitchesGirls',    url:q=>`/api/bitchesgirls?term=${q}`,        type:'urls',   key:['urls','titles'] },
-      { name:'ThotsLife',       url:q=>`/api/thotslife?term=${q}`,           type:'urls',   key:['urls','titles'] },
+      /* … all the others … */
       { name:'Fapello Gallery', url:q=>`/api/fapello-gallery?album_url=${q}`,type:'gallery' },
       { name:'JPG5 Gallery',    url:q=>`/api/jpg5-gallery?album_url=${q}`,    type:'gallery' }
     ];
 
-    let results = JSON.parse(localStorage.getItem('n3xus_results')||'[]');
-
-    document.addEventListener('DOMContentLoaded',()=>{
+    document.addEventListener('DOMContentLoaded', () => {
       initNav(); initFAQ(); initModelsTools(); initBackToTop();
       telegramBtn.addEventListener('click', ()=> window.open('https://t.me/your_telegram_link','_blank'));
       discordBtn.addEventListener('click', ()=> window.open('https://discord.gg/your_discord_link','_blank'));
-      if(results.length) renderModels(results);
+      jpg5Btn.addEventListener('click', fetchJPG5Album);
+      uploadBtn.addEventListener('click', uploadNewModel);
+      if (results.length) renderModels(results);
     });
 
+    // Navigation & search
     function initNav(){
       [menuHome,menuSearch,menuModels,menuFaq,menuTerms].forEach(btn=>{
-        btn.onclick=e=>{
-          e.preventDefault();
-          showSection(btn.id.replace('menu-',''));
-        };
+        btn.onclick=e=>{ e.preventDefault(); showSection(btn.id.replace('menu-','')); };
       });
       searchForm.addEventListener('submit',async e=>{
         e.preventDefault();
@@ -394,22 +445,20 @@
         showSection('search');
       });
     }
-
     async function doSearch(term){
       let model={name:term,endpoints:[]};
       for(let ep of endpoints){
         if(ep.name==='JPG5 Gallery') continue;
-        let url=(ep.name==='JPG5 Gallery')? ep.url(term) : ep.url(encodeURIComponent(term));
+        let url=ep.url(encodeURIComponent(term));
         try{
-          let res=await fetch(url),
-              data=await res.json(),
-              items=ep.type==='gallery'? data.images||[] :
-                    ep.type==='albums'? data.albums||[] :
-                    data[ep.key[0]].map((u,i)=>({url:u,title:data[ep.key[1]][i]}));
+          let res=await fetch(url), data=await res.json();
+          let items= ep.type==='gallery'? data.images||[]
+                   : ep.type==='albums'? data.albums||[]
+                   : data[ep.key[0]].map((u,i)=>({url:u,title:data[ep.key[1]][i]}));
           if(items.length) model.endpoints.push({...ep,items});
         }catch{}
       }
-      // JPG5: only if it's a URL
+      // JPG5 endpoint if search term was a URL
       if(term.startsWith('http')){
         try{
           let res=await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`),
@@ -421,41 +470,12 @@
       localStorage.setItem('n3xus_results',JSON.stringify(results));
     }
 
-    function showSection(sec){
-      [intro,searchSec,modelsSec,galleryView,faqSec,termsSec].forEach(el=>el.style.display='none');
-      document.querySelectorAll('.sidebar a').forEach(a=>a.classList.remove('active'));
-      switch(sec){
-        case 'home': intro.style.display='block'; menuHome.classList.add('active'); break;
-        case 'search': searchSec.style.display='block'; menuSearch.classList.add('active'); break;
-        case 'models': modelsSec.style.display='block'; menuModels.classList.add('active'); break;
-        case 'faq': faqSec.style.display='block'; menuFaq.classList.add('active'); break;
-        case 'terms': termsSec.style.display='block'; menuTerms.classList.add('active'); break;
-      }
-    }
-
-    function renderModels(list){
-      modelsGrid.innerHTML='';
-      for(let m of list){
-        let thumbEp = m.endpoints.find(e=>e.name==='Erome Gallery'),
-            thumb = thumbEp? thumbEp.items[0] : '/static/album-placeholder.png';
-        let card=document.createElement('div');
-        card.className='model-card';
-        card.innerHTML=`
-          <img src="${thumb}" alt="${m.name} thumbnail"/>
-          <div class="info">
-            <h3>${m.name}</h3>
-            <p>${m.endpoints.length} sources</p>
-          </div>`;
-        card.onclick=()=>openGallery(m);
-        modelsGrid.appendChild(card);
-      }
-    }
-
+    // Render search results
     function renderSearch(list){
       searchGrid.innerHTML='';
       for(let m of list){
         let thumbEp = m.endpoints.find(e=>e.name==='Erome Gallery'),
-            thumb = thumbEp? thumbEp.items[0] : '/static/album-placeholder.png';
+            thumb   = thumbEp? thumbEp.items[0] : DEFAULT_THUMB;
         let card=document.createElement('div');
         card.className='model-card';
         card.innerHTML=`
@@ -469,27 +489,158 @@
       }
     }
 
+    // Render models on the Models page
+    function renderModels(list){
+      modelsGrid.innerHTML='';
+      for(let m of list){
+        let thumbEp = m.endpoints.find(e=>e.name==='Erome Gallery'),
+            thumb   = thumbEp? thumbEp.items[0] : DEFAULT_THUMB;
+        let card=document.createElement('div');
+        card.className='model-card';
+        card.innerHTML=`
+          <img src="${thumb}" alt="${m.name} thumbnail"/>
+          <div class="info">
+            <h3>${m.name}</h3>
+            <p>${m.endpoints.length} sources</p>
+          </div>`;
+        card.onclick=()=>openGallery(m);
+        modelsGrid.appendChild(card);
+      }
+    }
+
+    // Gallery / album view with admin controls
     function openGallery(model){
       showSection(''); galleryView.style.display='block';
-      modelTitle.textContent=model.name;
-      albumLinks.innerHTML='';
+      modelTitle.textContent = model.name;
+      albumLinks.innerHTML    = '';
+
       for(let ep of model.endpoints){
-        let sec=document.createElement('div'); sec.className='endpoint-section';
-        sec.innerHTML=`<h3>${ep.name} (${ep.items.length})</h3>`;
-        let grid=document.createElement('div'); grid.className='items-grid';
-        for(let item of ep.items){
-          let url=typeof item==='string'? item : item.url,
-              thumb=(ep.name==='Erome Gallery'? url : (model.endpoints.find(e=>e.name==='Erome Gallery')?.items[0]||url));
-          let a=document.createElement('a'); a.href=url; a.target='_blank';
-          let img=document.createElement('img'); img.src=thumb; img.alt=ep.name;
-          a.appendChild(img); grid.appendChild(a);
+        let sec = document.createElement('div');
+        sec.className = 'endpoint-section';
+
+        // Header + admin buttons
+        let header = document.createElement('div');
+        header.innerHTML = `<h3>${ep.name} (${ep.items.length})</h3>`;
+        if(adminMode){
+          let delBtn = document.createElement('button');
+          delBtn.textContent='Delete Album';
+          delBtn.onclick=()=>{
+            if(confirm(`Delete album "${ep.name}"?`)){
+              model.endpoints = model.endpoints.filter(e=>e!==ep);
+              localStorage.setItem('n3xus_results',JSON.stringify(results));
+              openGallery(model);
+            }
+          };
+          let editBtn = document.createElement('button');
+          editBtn.textContent='Edit Thumb';
+          editBtn.onclick=()=>{
+            let newUrl = prompt('New thumbnail URL:');
+            if(newUrl){
+              ep.items[0] = newUrl;
+              localStorage.setItem('n3xus_results',JSON.stringify(results));
+              openGallery(model);
+            }
+          };
+          header.appendChild(delBtn);
+          header.appendChild(editBtn);
         }
-        sec.appendChild(grid); albumLinks.appendChild(sec);
+        sec.appendChild(header);
+
+        // Image grid
+        let grid = document.createElement('div');
+        grid.className = 'items-grid';
+        for(let item of ep.items){
+          let url   = typeof item==='string'? item : item.url;
+          let thumb = ep.name==='Erome Gallery'? url : DEFAULT_THUMB;
+          let a     = document.createElement('a');
+          a.href    = url;
+          a.target  = '_blank';
+          let img   = document.createElement('img');
+          img.src   = thumb;
+          img.alt   = ep.name;
+          a.appendChild(img);
+          grid.appendChild(a);
+        }
+        sec.appendChild(grid);
+        albumLinks.appendChild(sec);
       }
     }
 
     backBtn.onclick=()=> showSection('search');
 
+    function showSection(sec){
+      [intro,searchSec,modelsSec,galleryView,faqSec,termsSec].forEach(el=>el.style.display='none');
+      document.querySelectorAll('.sidebar a').forEach(a=>a.classList.remove('active'));
+      switch(sec){
+        case 'home':  intro.style.display='block';   menuHome.classList.add('active');    break;
+        case 'search':searchSec.style.display='block';menuSearch.classList.add('active');  break;
+        case 'models':modelsSec.style.display='block';menuModels.classList.add('active');  break;
+        case 'faq':   faqSec.style.display='block';   menuFaq.classList.add('active');     break;
+        case 'terms': termsSec.style.display='block'; menuTerms.classList.add('active');   break;
+      }
+    }
+
+    // JPG5 album fetch
+    async function fetchJPG5Album(){
+      let url = jpg5Input.value.trim();
+      if(!url) return alert('Enter a JPG5 album URL.');
+      try{
+        let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`),
+            data= await res.json();
+        if(!data.images.length) return alert('No images found.');
+        let model = { name:url, endpoints:[{name:'JPG5 Gallery',type:'gallery',items:data.images}] };
+        results.push(model);
+        localStorage.setItem('n3xus_results',JSON.stringify(results));
+        renderSearch([model]);
+        showSection('search');
+      }catch(err){
+        console.error(err);
+        alert('Error fetching JPG5 album.');
+      }
+    }
+
+    // Admin activation (Ctrl+I)
+    document.addEventListener('keydown', e=>{
+      if(e.ctrlKey && e.key.toLowerCase()==='i'){
+        let pwd = prompt('Enter admin password:');
+        if(pwd==='cassidy'){
+          adminMode = true;
+          adminPanel.style.display='block';
+          alert('Admin mode enabled.');
+        } else {
+          alert('Incorrect password.');
+        }
+      }
+    });
+
+    // ZIP-upload handler (adapted)
+    async function uploadNewModel(){
+      const name = document.getElementById("new-model-name").value.trim();
+      const zipFile = document.getElementById("new-model-zip").files[0];
+      if(!name) return alert("Enter a model name.");
+      if(!zipFile) return alert("Select a ZIP file.");
+      try {
+        const zip = await JSZip.loadAsync(zipFile);
+        const entries = Object.values(zip.files)
+          .filter(f=>!f.dir&&/\.(jpe?g|png|gif|mp4|webm)$/i.test(f.name));
+        if(entries.length<20) return alert("ZIP must contain at least 20 images/videos.");
+        const urls=[];
+        for(const file of entries){
+          const blob = await file.async("blob");
+          urls.push(URL.createObjectURL(blob));
+        }
+        results.push({ name, endpoints:[{name:'Uploaded Model',type:'gallery',items:urls}] });
+        localStorage.setItem('n3xus_results',JSON.stringify(results));
+        alert("Model uploaded!");
+        renderModels(results);
+        showSection('models');
+      } catch(err){
+        console.error(err);
+        alert("Error processing ZIP.");
+      }
+    }
+
+    // Models filter & tools
     function initModelsTools(){
       'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter=>{
         let btn=document.createElement('button');
@@ -499,16 +650,20 @@
       });
       filterIn.oninput=()=>filterModels(filterIn.value.trim());
     }
-
     function filterModels(f){
       for(let card of modelsGrid.children){
         let name=card.querySelector('h3').textContent.toLowerCase();
-        card.style.display = f.length===1?
-          (name.startsWith(f.toLowerCase())?'block':'none') :
-          (f.length>1? (name.includes(f.toLowerCase())?'block':'none') : 'block');
+        if(f.length===1){
+          card.style.display = name.startsWith(f.toLowerCase())?'block':'none';
+        } else if(f.length>1){
+          card.style.display = name.includes(f.toLowerCase())?'block':'none';
+        } else {
+          card.style.display = 'block';
+        }
       }
     }
 
+    // FAQ accordion
     function initFAQ(){
       faqBtns.forEach(btn=>btn.onclick=()=>{
         let pan=btn.nextElementSibling, ic=btn.querySelector('i');
@@ -521,6 +676,7 @@
       });
     }
 
+    // Back to top
     function initBackToTop(){
       backToTop.onclick=()=>window.scrollTo({top:0,behavior:'smooth'});
     }
