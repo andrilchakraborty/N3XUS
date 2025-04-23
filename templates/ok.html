@@ -428,7 +428,7 @@
           tabIconInput   = document.getElementById('tab-icon-url'),
           tabIconBtn     = document.getElementById('tab-icon-btn');
 
-    // All endpoints, with corrected Bunkr parameter names
+    // All endpoints…
     const endpoints = [
       { name:'Erome Gallery',   url:q=>`/api/erome-gallery?query=${q}`,       type:'gallery' },
       { name:'Erome Albums',    url:q=>`/api/erome-albums?username=${q}`,     type:'albums'  },
@@ -453,12 +453,20 @@
     ];
 
     document.addEventListener('DOMContentLoaded', () => {
-      initNav(); initFAQ(); initModelsTools(); initBackToTop(); loadTabIcon();
-      telegramBtn.addEventListener('click', ()=> window.open('https://t.me/your_telegram_link','_blank'));
-      discordBtn.addEventListener('click', ()=> window.open('https://discord.gg/your_discord_link','_blank'));
+      initNav();
+      initFAQ();
+      initModelsTools();
+      initBackToTop();
+      loadTabIcon();
+      // explicitly show Home at start
+      showSection('home');
+
+      telegramBtn.addEventListener('click', () => window.open('https://t.me/your_telegram_link', '_blank'));
+      discordBtn.addEventListener('click', () => window.open('https://discord.gg/your_discord_link', '_blank'));
       jpg5Btn.addEventListener('click', fetchJPG5Album);
       uploadBtn.addEventListener('click', uploadNewModel);
       tabIconBtn.addEventListener('click', setTabIcon);
+
       if (results.length) {
         renderModels(results);
       }
@@ -466,80 +474,95 @@
 
     function loadTabIcon() {
       const url = localStorage.getItem('n3xus_tab_icon');
-      if(url) { tabIconLink.href = url; tabIconInput.value = url; }
+      if (url) {
+        tabIconLink.href = url;
+        tabIconInput.value = url;
+      }
     }
 
     function setTabIcon() {
       const url = tabIconInput.value.trim();
-      if(!url) return alert('Enter a valid URL for the tab icon.');
+      if (!url) return alert('Enter a valid URL for the tab icon.');
       tabIconLink.href = url;
       localStorage.setItem('n3xus_tab_icon', url);
       alert('Tab icon updated!');
     }
 
     // Navigation & search
-    function initNav(){
-      [menuHome,menuSearch,menuModels,menuFaq,menuTerms].forEach(btn=>{
-        btn.onclick=e=>{ e.preventDefault(); showSection(btn.id.replace('menu-','')); };
+    function initNav() {
+      [menuHome, menuSearch, menuModels, menuFaq, menuTerms].forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.preventDefault();
+          showSection(btn.id.replace('menu-', ''));
+        });
       });
-      searchForm.addEventListener('submit',async e=>{
+
+      searchForm.addEventListener('submit', async e => {
         e.preventDefault();
-        let q = searchIn.value.trim(); if(!q) return;
-        // Inform user that search is in progress
+        let q = searchIn.value.trim();
+        if (!q) return;
         alert(`Fetching leaks for ${q}. Please check the Search section for results and wait a moment.`);
         let success = await doSearch(q);
-        if(!success) return;
-        renderSearch([results[results.length-1]]);
+        if (!success) return;
+        renderSearch([ results[results.length - 1] ]);
         renderModels(results);
         showSection('search');
       });
     }
 
-    async function doSearch(term){
-      let model = { name:term, endpoints:[] };
-      for(let ep of endpoints){
-        if(ep.name==='JPG5 Gallery') continue;
+    async function doSearch(term) {
+      let model = { name: term, endpoints: [] };
+      for (let ep of endpoints) {
+        if (ep.name === 'JPG5 Gallery') continue;
         let url = ep.url(encodeURIComponent(term));
-        try{
+        try {
           let res = await fetch(url);
-          if(!res.ok) throw new Error(`HTTP ${res.status}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
           let data = await res.json();
           let items = [];
-          if(ep.type==='gallery') {
+          if (ep.type === 'gallery') {
             items = data.images || [];
-          } else if(ep.type==='albums') {
+          } else if (ep.type === 'albums') {
             items = data.albums || [];
-          } else if(ep.type==='urls') {
+          } else if (ep.type === 'urls') {
             const urls = data[ep.key[0]] || [];
             const titles = data[ep.key[1]] || [];
-            items = urls.map((u,i)=>({url:u, title: titles[i]||u}));
+            items = urls.map((u, i) => ({ url: u, title: titles[i] || u }));
           }
-          if(items.length) model.endpoints.push({ ...ep, items });
-        }catch(err){ console.error('Error fetching', ep.name, err); }
+          if (items.length) model.endpoints.push({ ...ep, items });
+        } catch (err) {
+          console.error('Error fetching', ep.name, err);
+        }
       }
-      // JPG5 endpoint if input was URL
-      if(term.startsWith('http')){
-        try{
+      // JPG5 fallback if user pasted an album URL
+      if (term.startsWith('http')) {
+        try {
           let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`);
-          if(!res.ok) throw new Error(`HTTP ${res.status}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
           let data = await res.json();
-          if(data.images && data.images.length){
-            model.endpoints.push({ name:'JPG5 Gallery', type:'gallery', items:data.images });
+          if (data.images && data.images.length) {
+            model.endpoints.push({ name: 'JPG5 Gallery', type: 'gallery', items: data.images });
           }
-        }catch(err){ console.error('Error fetching JPG5', err); }
+        } catch (err) {
+          console.error('Error fetching JPG5', err);
+        }
       }
-      if(model.endpoints.length===0){ alert(`No leaks found for ${term}`); return false; }
+      if (model.endpoints.length === 0) {
+        alert(`No leaks found for ${term}`);
+        return false;
+      }
       results.push(model);
       localStorage.setItem('n3xus_results', JSON.stringify(results));
       return true;
     }
 
-    // Render search results
-    function renderSearch(list){
+    function renderSearch(list) {
       searchGrid.innerHTML = '';
-      for(let m of list){
-        let thumbEp = m.endpoints.find(e=>e.thumbnail) || m.endpoints.find(e=>e.name==='Erome Gallery');
-        let thumb = thumbEp ? (thumbEp.thumbnail || thumbEp.items[0].url || thumbEp.items[0]) : DEFAULT_THUMB;
+      for (let m of list) {
+        let thumbEp = m.endpoints.find(e => e.thumbnail) || m.endpoints.find(e => e.name === 'Erome Gallery');
+        let thumb = thumbEp
+          ? (thumbEp.thumbnail || (thumbEp.items[0].url || thumbEp.items[0]))
+          : DEFAULT_THUMB;
         let card = document.createElement('div');
         card.className = 'model-card';
         card.innerHTML = `
@@ -548,17 +571,18 @@
             <h3>${m.name}</h3>
             <p>${m.endpoints.length} sources</p>
           </div>`;
-        card.onclick = () => openGallery(m);
+        card.addEventListener('click', () => openGallery(m));
         searchGrid.appendChild(card);
       }
     }
 
-    // Render models on the Models page
-    function renderModels(list){
+    function renderModels(list) {
       modelsGrid.innerHTML = '';
-      for(let m of list){
-        let thumbEp = m.endpoints.find(e=>e.thumbnail) || m.endpoints.find(e=>e.name==='Erome Gallery');
-        let thumb = thumbEp ? (thumbEp.thumbnail || thumbEp.items[0].url || thumbEp.items[0]) : DEFAULT_THUMB;
+      for (let m of list) {
+        let thumbEp = m.endpoints.find(e => e.thumbnail) || m.endpoints.find(e => e.name === 'Erome Gallery');
+        let thumb = thumbEp
+          ? (thumbEp.thumbnail || (thumbEp.items[0].url || thumbEp.items[0]))
+          : DEFAULT_THUMB;
         let card = document.createElement('div');
         card.className = 'model-card';
         card.innerHTML = `
@@ -567,222 +591,272 @@
             <h3>${m.name}</h3>
             <p>${m.endpoints.length} sources</p>
           </div>`;
-        card.onclick = () => openGallery(m);
+        card.addEventListener('click', () => openGallery(m));
         modelsGrid.appendChild(card);
       }
     }
 
-    // Gallery / album view with admin controls
-    function openGallery(model){
-      showSection(''); galleryView.style.display='block';
+    function openGallery(model) {
+      showSection('');
+      galleryView.style.display = 'block';
       modelTitle.textContent = model.name;
       albumLinks.innerHTML = '';
 
-      // Admin: Delete Model button
-      if(adminMode){
+      if (adminMode) {
         let deleteModelBtn = document.createElement('button');
         deleteModelBtn.textContent = 'Delete Model';
-        deleteModelBtn.onclick = () => {
-          if(confirm(`Delete model "${model.name}"?`)){
-            results = results.filter(m=>m!==model);
+        deleteModelBtn.addEventListener('click', () => {
+          if (confirm(`Delete model "${model.name}"?`)) {
+            results = results.filter(m => m !== model);
             localStorage.setItem('n3xus_results', JSON.stringify(results));
             renderModels(results);
             showSection('models');
           }
-        };
+        });
         albumLinks.appendChild(deleteModelBtn);
       }
 
-      for(let ep of model.endpoints.slice()){
+      model.endpoints.forEach((ep, epIndex) => {
         let sec = document.createElement('div');
         sec.className = 'endpoint-section';
 
-        // Header + admin buttons
         let header = document.createElement('div');
         header.innerHTML = `<h3>${ep.name} (${ep.items.length})</h3>`;
-        if(adminMode){
-          let delBtn = document.createElement('button'); delBtn.textContent = 'Delete Album';
-          delBtn.onclick = () => {
-            if(confirm(`Delete album "${ep.name}" entirely?`)){
-              model.endpoints = model.endpoints.filter(e=>e!==ep);
-              if(model.endpoints.length===0){
-                results = results.filter(m=>m!==model);
-                showSection('models');
-                renderModels(results);
+        if (adminMode) {
+          let delBtn = document.createElement('button');
+          delBtn.textContent = 'Delete Album';
+          delBtn.addEventListener('click', () => {
+            if (confirm(`Delete album "${ep.name}" entirely?`)) {
+              model.endpoints.splice(epIndex, 1);
+              if (!model.endpoints.length) {
+                results = results.filter(m => m !== model);
                 localStorage.setItem('n3xus_results', JSON.stringify(results));
+                renderModels(results);
+                showSection('models');
                 return;
               }
               localStorage.setItem('n3xus_results', JSON.stringify(results));
               renderModels(results);
               openGallery(model);
             }
-          };
-          let editBtn = document.createElement('button'); editBtn.textContent = 'Edit Thumb';
-          editBtn.onclick = () => {
+          });
+          let editBtn = document.createElement('button');
+          editBtn.textContent = 'Edit Thumb';
+          editBtn.addEventListener('click', () => {
             let newUrl = prompt('New thumbnail URL:', ep.thumbnail || '');
-            if(newUrl){
+            if (newUrl) {
               ep.thumbnail = newUrl;
               localStorage.setItem('n3xus_results', JSON.stringify(results));
-              renderModels(results); openGallery(model);
+              renderModels(results);
+              openGallery(model);
             }
-          };
-          header.appendChild(delBtn);
-          header.appendChild(editBtn);
+          });
+          header.append(delBtn, editBtn);
         }
         sec.appendChild(header);
 
-        // Image grid
-        let grid = document.createElement('div'); grid.className = 'items-grid';
+        let grid = document.createElement('div');
+        grid.className = 'items-grid';
         ep.items.forEach((item, idx) => {
           let url = item.url || item;
-          let thumb = ep.name==='Erome Gallery' ? url : (ep.thumbnail || DEFAULT_THUMB);
-          let wrapper = document.createElement('div'); wrapper.className = 'item-wrapper';
-          let a = document.createElement('a'); a.href=url; a.target='_blank';
-          let img = document.createElement('img'); img.src=thumb; img.alt=ep.name;
+          let thumb = ep.name === 'Erome Gallery' ? url : (ep.thumbnail || DEFAULT_THUMB);
+          let wrapper = document.createElement('div');
+          wrapper.className = 'item-wrapper';
+
+          let a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          let img = document.createElement('img');
+          img.src = thumb;
+          img.alt = ep.name;
           a.appendChild(img);
           wrapper.appendChild(a);
 
-          if(adminMode){
-            // Delete individual media
+          if (adminMode) {
             let delMediaBtn = document.createElement('button');
             delMediaBtn.className = 'item-btn delete-btn';
             delMediaBtn.innerHTML = '<i class="fas fa-trash"></i>';
-            delMediaBtn.onclick = () => {
-              if(confirm('Delete this media item?')){
-                ep.items.splice(idx,1);
-                if(ep.items.length===0){
-                  model.endpoints = model.endpoints.filter(e=>e!==ep);
-                  if(model.endpoints.length===0){
-                    results = results.filter(m=>m!==model);
-                    showSection('models');
-                    renderModels(results);
+            delMediaBtn.addEventListener('click', () => {
+              if (confirm('Delete this media item?')) {
+                ep.items.splice(idx, 1);
+                if (!ep.items.length) {
+                  model.endpoints = model.endpoints.filter((_, i) => i !== epIndex);
+                  if (!model.endpoints.length) {
+                    results = results.filter(m => m !== model);
                     localStorage.setItem('n3xus_results', JSON.stringify(results));
+                    renderModels(results);
+                    showSection('models');
                     return;
                   }
                 }
                 localStorage.setItem('n3xus_results', JSON.stringify(results));
-                renderModels(results); openGallery(model);
+                renderModels(results);
+                openGallery(model);
               }
-            };
+            });
             wrapper.appendChild(delMediaBtn);
-            // Edit individual media
+
             let editMediaBtn = document.createElement('button');
             editMediaBtn.className = 'item-btn edit-btn';
             editMediaBtn.innerHTML = '<i class="fas fa-edit"></i>';
-            editMediaBtn.onclick = () => {
+            editMediaBtn.addEventListener('click', () => {
               let newUrl = prompt('New media URL:', url);
-              if(newUrl){
-                if(typeof item === 'object') item.url = newUrl;
+              if (newUrl) {
+                if (typeof item === 'object') item.url = newUrl;
                 else ep.items[idx] = newUrl;
                 localStorage.setItem('n3xus_results', JSON.stringify(results));
-                renderModels(results); openGallery(model);
+                renderModels(results);
+                openGallery(model);
               }
-            };
+            });
             wrapper.appendChild(editMediaBtn);
           }
 
           grid.appendChild(wrapper);
         });
+
         sec.appendChild(grid);
         albumLinks.appendChild(sec);
-      }
+      });
     }
 
-    backBtn.onclick = () => showSection('search');
+    backBtn.addEventListener('click', () => {
+      showSection('search');
+    });
 
-    function showSection(sec){
-      [intro,searchSec,modelsSec,galleryView,faqSec,termsSec].forEach(el=>el.style.display='none');
-      document.querySelectorAll('.sidebar a').forEach(a=>a.classList.remove('active'));
-      switch(sec){
-        case 'home':   intro.style.display='block';    menuHome.classList.add('active');    break;
-        case 'search': searchSec.style.display='block'; menuSearch.classList.add('active');  break;
-        case 'models': modelsSec.style.display='block'; menuModels.classList.add('active');  break;
-        case 'faq':    faqSec.style.display='block';    menuFaq.classList.add('active');     break;
-        case 'terms':  termsSec.style.display='block';  menuTerms.classList.add('active');   break;
+    function showSection(sec) {
+      [intro, searchSec, modelsSec, galleryView, faqSec, termsSec].forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
+      switch (sec) {
+        case 'home':
+          intro.style.display = 'block';
+          menuHome.classList.add('active');
+          break;
+        case 'search':
+          searchSec.style.display = 'block';
+          menuSearch.classList.add('active');
+          break;
+        case 'models':
+          modelsSec.style.display = 'block';
+          menuModels.classList.add('active');
+          break;
+        case 'faq':
+          faqSec.style.display = 'block';
+          menuFaq.classList.add('active');
+          break;
+        case 'terms':
+          termsSec.style.display = 'block';
+          menuTerms.classList.add('active');
+          break;
       }
     }
 
     // JPG5 album fetch
-    async function fetchJPG5Album(){
-      let url = jpg5Input.value.trim(); if(!url) return alert('Enter a JPG5 album URL.');
-      try{
+    async function fetchJPG5Album() {
+      let url = jpg5Input.value.trim();
+      if (!url) return alert('Enter a JPG5 album URL.');
+      try {
         let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`);
-        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         let data = await res.json();
-        if(!data.images.length) return alert(`No leaks found for ${url}`);
-        let model = { name:url, endpoints:[{ name:'JPG5 Gallery', type:'gallery', items:data.images } ] };
+        if (!data.images.length) return alert(`No leaks found for ${url}`);
+        let model = { name: url, endpoints: [ { name: 'JPG5 Gallery', type: 'gallery', items: data.images } ] };
         results.push(model);
         localStorage.setItem('n3xus_results', JSON.stringify(results));
-        renderSearch([model]); renderModels(results); showSection('search');
-      }catch(err){ console.error(err); alert('Error fetching JPG5 album.'); }
+        renderSearch([model]);
+        renderModels(results);
+        showSection('search');
+      } catch (err) {
+        console.error(err);
+        alert('Error fetching JPG5 album.');
+      }
     }
 
     // Admin activation (Ctrl+I)
-    document.addEventListener('keydown', e=>{
-      if(e.ctrlKey && e.key.toLowerCase()==='i'){
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.key.toLowerCase() === 'i') {
         let pwd = prompt('Enter admin password:');
-        if(pwd==='cassidy'){
-          adminMode = true; adminPanel.style.display='block'; alert('Admin mode enabled.');
-        } else alert('Incorrect password.');
+        if (pwd === 'cassidy') {
+          adminMode = true;
+          adminPanel.style.display = 'block';
+          alert('Admin mode enabled.');
+        } else {
+          alert('Incorrect password.');
+        }
       }
     });
 
     // ZIP-upload handler
-    async function uploadNewModel(){
+    async function uploadNewModel() {
       const name = document.getElementById('new-model-name').value.trim();
       const zipFile = document.getElementById('new-model-zip').files[0];
-      if(!name) return alert('Enter a model name.');
-      if(!zipFile) return alert('Select a ZIP file.');
+      if (!name) return alert('Enter a model name.');
+      if (!zipFile) return alert('Select a ZIP file.');
       try {
         const zip = await JSZip.loadAsync(zipFile);
         const entries = Object.values(zip.files)
-          .filter(f=>!f.dir&&/\.(jpe?g|png|gif|mp4|webm)$/i.test(f.name));
-        if(entries.length<20) return alert('ZIP must contain at least 20 images/videos.');
+          .filter(f => !f.dir && /\.(jpe?g|png|gif|mp4|webm)$/i.test(f.name));
+        if (entries.length < 20) return alert('ZIP must contain at least 20 images/videos.');
         const urls = [];
-        for(const file of entries){
+        for (const file of entries) {
           const blob = await file.async('blob');
           urls.push(URL.createObjectURL(blob));
         }
-        results.push({ name, endpoints:[{ name:'Uploaded Model', type:'gallery', items:urls }] });
+        results.push({ name, endpoints: [ { name:'Uploaded Model', type:'gallery', items:urls } ] });
         localStorage.setItem('n3xus_results', JSON.stringify(results));
         alert('Model uploaded!');
         renderModels(results);
         showSection('models');
-      } catch(err){ console.error(err); alert('Error processing ZIP.'); }
+      } catch (err) {
+        console.error(err);
+        alert('Error processing ZIP.');
+      }
     }
 
     // Models filter & tools
-    function initModelsTools(){
-      'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter=>{
-        let btn = document.createElement('button'); btn.textContent=letter;
-        btn.onclick=()=>filterModels(letter);
+    function initModelsTools() {
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter => {
+        let btn = document.createElement('button');
+        btn.textContent = letter;
+        btn.addEventListener('click', () => filterModels(letter));
         azList.appendChild(btn);
       });
-      filterIn.oninput=()=>filterModels(filterIn.value.trim());
+      filterIn.addEventListener('input', () => filterModels(filterIn.value.trim()));
     }
-    function filterModels(f){
-      for(let card of modelsGrid.children){
-        let name=card.querySelector('h3').textContent.toLowerCase();
-        if(f.length===1){
-          card.style.display = name.startsWith(f.toLowerCase())?'block':'none';
-        } else if(f.length>1){
-          card.style.display = name.includes(f.toLowerCase())?'block':'none';
-        } else card.style.display='block';
+
+    function filterModels(f) {
+      for (let card of modelsGrid.children) {
+        let name = card.querySelector('h3').textContent.toLowerCase();
+        if (f.length === 1) {
+          card.style.display = name.startsWith(f.toLowerCase()) ? 'block' : 'none';
+        } else if (f.length > 1) {
+          card.style.display = name.includes(f.toLowerCase()) ? 'block' : 'none';
+        } else {
+          card.style.display = 'block';
+        }
       }
     }
 
     // FAQ accordion
-    function initFAQ(){
-      faqBtns.forEach(btn=>btn.onclick=>{
-        let pan=btn.nextElementSibling, ic=btn.querySelector('i');
-        document.querySelectorAll('.panel').forEach(p=>p.style.maxHeight=null);
-        document.querySelectorAll('.accordion-item i').forEach(i=>i.classList.replace('fa-minus','fa-plus'));
-        if(!pan.style.maxHeight){ pan.style.maxHeight=pan.scrollHeight+'px'; ic.classList.replace('fa-plus','fa-minus'); }
+    function initFAQ() {
+      faqBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          let panel = btn.nextElementSibling;
+          let icon = btn.querySelector('i');
+          document.querySelectorAll('.panel').forEach(p => p.style.maxHeight = null);
+          document.querySelectorAll('.accordion-item i').forEach(i => i.classList.replace('fa-minus','fa-plus'));
+          if (!panel.style.maxHeight) {
+            panel.style.maxHeight = panel.scrollHeight + 'px';
+            icon.classList.replace('fa-plus','fa-minus');
+          }
+        });
       });
     }
 
     // Back to top
-    function initBackToTop(){ backToTop.onclick=()=>window.scrollTo({top:0,behavior:'smooth'}); }
+    function initBackToTop() {
+      backToTop.addEventListener('click', () => window.scrollTo({ top:0, behavior:'smooth' }));
+    }
   </script>
 </body>
 </html>
