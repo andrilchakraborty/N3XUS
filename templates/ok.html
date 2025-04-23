@@ -1,4 +1,3 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css?family=Montserrat:400,600,700&display=swap" rel="stylesheet"/>
   <!-- Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
   <style>
     :root {
       --bg-dark: #0d0d0f;
@@ -22,6 +22,21 @@
     * { margin:0; padding:0; box-sizing:border-box; font-family:'Montserrat',sans-serif; }
     body { display:flex; min-height:100vh; background:var(--bg-dark); color:var(--text-light); }
     a { text-decoration:none; color:inherit; }
+
+    /* Generic button styling with pink border & glow */
+    button {
+      border:2px solid var(--accent);
+      border-radius:6px;
+      background:none;
+      color:var(--accent);
+      cursor:pointer;
+      transition: box-shadow .2s, background .2s, color .2s;
+    }
+    button:hover {
+      box-shadow: 0 0 8px var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
 
     /* Sidebar */
     .sidebar {
@@ -54,33 +69,19 @@
       display:flex; align-items:center;
       justify-content:space-between; padding:0 20px;
     }
-    #logo { height:40px; }
     #search-form { display:flex; align-items:center; }
     #search-input {
       padding:6px 10px; font-size:14px;
       border:none; border-radius:4px 0 0 4px; width:200px;
     }
     #search-btn {
-      padding:6px 12px; border:none; border-radius:0 4px 4px 0;
-      background:var(--accent); color:#fff; cursor:pointer;
-      transition: background .2s;
+      padding:6px 12px;
     }
-    #search-btn:hover { background:var(--accent-hover); }
-
-    /* Telegram & Discord buttons */
     .header-btn {
-      display:flex;
-      align-items:center; justify-content:center;
+      display:flex; align-items:center; justify-content:center;
       width:44px; height:44px;
-      border:2px solid var(--accent);
-      border-radius:6px;
-      background:none; color:var(--accent);
-      font-size:22px; margin-left:8px;
-      cursor:pointer; transition:background .2s, color .2s;
-    }
-    .header-btn:hover {
-      background:var(--accent);
-      color:#fff;
+      margin-left:8px;
+      font-size:22px;
     }
 
     /* Intro */
@@ -103,7 +104,17 @@
 
     /* Search Section */
     #search-section { display:none; padding:20px 40px; }
-    .search-cards { display:grid; gap:16px; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+    .search-cards {
+      display:grid; gap:16px;
+      grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+    }
+    #jpg5-section {
+      display:flex; gap:8px; margin-bottom:16px;
+    }
+    #jpg5-input {
+      flex:1; padding:6px 10px; font-size:14px;
+      border:none; border-radius:4px;
+    }
 
     /* Models Section */
     .models-section { padding:20px 40px; display:none; }
@@ -115,15 +126,14 @@
       padding:6px 10px; font-size:14px; border:none;
       border-radius:4px; width:200px;
     }
-    #model-az-list button {
-      background:none; border:none; color:var(--accent);
-      cursor:pointer; font-size:14px; padding:4px 6px;
-      border-radius:4px; transition:background .2s;
-    }
     #model-az-list button:hover { background:rgba(230,0,126,0.1); }
 
-    .model-cards { display:grid; gap:16px; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+    .model-cards {
+      display:grid; gap:16px;
+      grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+    }
     .model-card {
+      position:relative;
       background:var(--bg-darker); border-radius:4px; overflow:hidden;
       cursor:pointer; transition:transform .1s;
     }
@@ -131,14 +141,15 @@
     .model-card img {
       width:100%; height:100px; object-fit:cover;
     }
-    .model-card .info {
-      padding:8px; text-align:center;
+    .model-card .info { padding:8px; text-align:center; }
+    .model-card .info h3 { font-size:14px; margin-bottom:4px; color:var(--text-light); }
+    .model-card .info p { font-size:12px; color:var(--text-muted); }
+    .admin-controls {
+      position:absolute; top:8px; right:8px;
+      display:flex; flex-direction:column; gap:4px;
     }
-    .model-card .info h3 {
-      font-size:14px; margin-bottom:4px; color:var(--text-light);
-    }
-    .model-card .info p {
-      font-size:12px; color:var(--text-muted);
+    .admin-controls button {
+      font-size:12px; padding:2px 4px;
     }
 
     /* Gallery subview */
@@ -159,57 +170,24 @@
 
     /* FAQ Accordion */
     .accordion { max-width:800px; margin:40px auto; }
-    .accordion-item {
-      background:var(--bg-darker); border-radius:4px;
-      margin-bottom:16px; overflow:hidden;
-    }
-    .accordion-item button {
-      width:100%; background:none; border:none;
-      color:var(--text-light); text-align:left;
-      padding:20px; font-size:16px;
-      display:flex; justify-content:space-between;
-      align-items:center; cursor:pointer;
-      transition: background .2s;
-    }
+    .accordion-item { background:var(--bg-darker); border-radius:4px; margin-bottom:16px; overflow:hidden; }
+    .accordion-item button { width:100%; background:none; border:none; color:var(--text-light); text-align:left; padding:20px; font-size:16px; display:flex; justify-content:space-between; align-items:center; }
     .accordion-item button:hover { background:rgba(255,255,255,0.05); }
-    .accordion-item button i {
-      font-size:20px; transition:transform .3s;
-    }
-    .panel {
-      max-height:0; overflow:hidden;
-      transition:max-height .3s ease;
-      background:var(--bg-dark);
-    }
+    .panel { max-height:0; overflow:hidden; transition:max-height .3s ease; background:var(--bg-dark); }
     .panel p { padding:0 20px 20px; color:var(--text-muted); }
 
     /* Terms */
-    #terms {
-      max-width:800px; margin:40px auto;
-      color:var(--text-muted); line-height:1.5; padding:0 20px;
-    }
+    #terms { max-width:800px; margin:40px auto; color:var(--text-muted); line-height:1.5; padding:0 20px; }
 
     /* Footer */
-    .footer {
-      background:var(--bg-darker);
-      padding:40px 20px; color:var(--text-muted);
-      display:flex; justify-content:space-between; flex-wrap:wrap;
-    }
+    .footer { background:var(--bg-darker); padding:40px 20px; color:var(--text-muted); display:flex; justify-content:space-between; flex-wrap:wrap; }
     .footer .left { max-width:600px; }
-    .footer .left h3 { color:#fff; margin-bottom:8px; }
-    .footer .links { list-style:none; display:flex; flex-wrap:wrap; margin-top:16px; }
     .footer .links li { margin-right:16px; margin-bottom:8px; }
     .footer .payments i { margin-right:12px; font-size:24px; }
 
     /* Back to top */
-    .back-to-top {
-      position:fixed; bottom:20px; right:50%;
-      transform:translateX(50%);
-      background:var(--accent); width:48px; height:48px;
-      border-radius:50%; display:flex; align-items:center;
-      justify-content:center; color:#fff; cursor:pointer;
-      transition:background .2s;
-    }
-    .back-to-top:hover { background:var(--accent-hover); }
+    .back-to-top { position:fixed; bottom:20px; right:50%; transform:translateX(50%); background:var(--accent); width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; cursor:pointer; }
+    .back-to-top:hover { box-shadow:0 0 8px var(--accent); }
   </style>
 </head>
 <body>
@@ -229,7 +207,6 @@
   <div class="main">
     <header class="header">
       <h1 style="color:var(--accent);">N3XUS LEAKS</h1>
-      <img id="logo" src="" alt="Logo"/>
       <form id="search-form">
         <input id="search-input" placeholder="Search term…" autocomplete="off"/>
         <button type="submit" id="search-btn"><i class="fas fa-search"></i></button>
@@ -242,16 +219,16 @@
       <!-- Home Intro -->
       <section id="intro">
         <h2>Welcome to N3XUS LEAKS</h2>
-        <p>
-          Search any creator name and instantly pull galleries across multiple leak-sites.
-          The results are stored locally so you can browse even if the internet goes down.
-          Simply enter a search term above and view thumbnails; click a card to open all links.
-        </p>
+        <p>Search any creator name and instantly pull galleries across multiple leak-sites. The results are stored locally so you can browse even if the internet goes down.</p>
       </section>
 
       <!-- Search Section -->
       <section id="search-section">
         <h2>Search Results</h2>
+        <div id="jpg5-section">
+          <input id="jpg5-input" type="text" placeholder="Enter JPG5 album URL…" />
+          <button id="jpg5-btn">Fetch JPG5 Album</button>
+        </div>
         <div class="search-cards" id="search-grid"></div>
       </section>
 
@@ -289,7 +266,7 @@
 
       <!-- Terms -->
       <section id="terms">
-        <h2>Terms &amp; Conditions</h2>
+        <h2>Terms & Conditions</h2>
         <p>By using this site you agree not to redistribute copyrighted content. N3XUS LEAKS is not responsible for external site availability.</p>
       </section>
     </div>
@@ -320,102 +297,72 @@
   <div class="back-to-top"><i class="fas fa-arrow-up"></i></div>
 
   <script>
-    // Elements
-    const menuHome   = document.getElementById('menu-home'),
-          menuSearch = document.getElementById('menu-search'),
-          menuModels = document.getElementById('menu-models'),
-          menuFaq    = document.getElementById('menu-faq'),
-          menuTerms  = document.getElementById('menu-terms'),
-          intro      = document.getElementById('intro'),
-          searchSec  = document.getElementById('search-section'),
-          modelsSec  = document.getElementById('models-section'),
-          galleryView= document.getElementById('gallery-view'),
-          faqSec     = document.getElementById('faq'),
-          termsSec   = document.getElementById('terms'),
-          searchForm = document.getElementById('search-form'),
-          searchIn   = document.getElementById('search-input'),
-          searchGrid = document.getElementById('search-grid'),
-          modelsGrid = document.getElementById('models-grid'),
-          backBtn    = document.getElementById('back-btn'),
-          modelTitle = document.getElementById('model-title'),
-          albumLinks = document.getElementById('album-links'),
-          faqBtns    = document.querySelectorAll('.accordion-item button'),
-          backToTop  = document.querySelector('.back-to-top'),
-          telegramBtn= document.getElementById('telegram-btn'),
-          discordBtn = document.getElementById('discord-btn'),
-          azList     = document.getElementById('model-az-list'),
-          filterIn   = document.getElementById('model-filter-input');
+    const FALLBACK_THUMB_URL = 'https://via.placeholder.com/120?text=Thumbnail';
+    let isAdmin = sessionStorage.getItem('isAdmin') === 'true';
+    const menuHome=document.getElementById('menu-home'), menuSearch=document.getElementById('menu-search'), menuModels=document.getElementById('menu-models'), menuFaq=document.getElementById('menu-faq'), menuTerms=document.getElementById('menu-terms');
+    const intro=document.getElementById('intro'), searchSec=document.getElementById('search-section'), modelsSec=document.getElementById('models-section'), galleryView=document.getElementById('gallery-view'), faqSec=document.getElementById('faq'), termsSec=document.getElementById('terms');
+    const searchForm=document.getElementById('search-form'), searchIn=document.getElementById('search-input'), searchGrid=document.getElementById('search-grid');
+    const jpg5Input=document.getElementById('jpg5-input'), jpg5Btn=document.getElementById('jpg5-btn');
+    const modelsGrid=document.getElementById('models-grid'), filterIn=document.getElementById('model-filter-input'), azList=document.getElementById('model-az-list');
+    const backBtn=document.getElementById('back-btn'), modelTitle=document.getElementById('model-title'), albumLinks=document.getElementById('album-links');
+    const faqBtns=document.querySelectorAll('.accordion-item button'), backToTop=document.querySelector('.back-to-top');
+    const telegramBtn=document.getElementById('telegram-btn'), discordBtn=document.getElementById('discord-btn');
 
-    // Endpoints
-    const endpoints = [
-      { name:'Erome Gallery',   url:q=>`/api/erome-gallery?query=${q}`,       type:'gallery' },
-      { name:'Erome Albums',    url:q=>`/api/erome-albums?username=${q}`,     type:'albums'  },
-      { name:'Bunkr Gallery',   url:q=>`/api/bunkr-gallery?query=${q}`,       type:'gallery' },
-      { name:'Bunkr Albums',    url:q=>`/api/bunkr-albums?query=${q}`,        type:'albums'  },
-      { name:'NotFans',         url:q=>`/api/notfans?search_term=${q}`,       type:'urls',   key:['urls','titles'] },
-      { name:'Influencers',     url:q=>`/api/influencers?term=${q}`,          type:'urls',   key:['urls','titles'] },
-      { name:'Thothub',         url:q=>`/api/thothub?term=${q}`,              type:'urls',   key:['urls','titles'] },
-      { name:'DirtyShip',       url:q=>`/api/dirtyship?term=${q}`,            type:'urls',   key:['urls','titles'] },
-      { name:'PimpBunny',       url:q=>`/api/pimpbunny?term=${q}`,            type:'urls',   key:['urls','titles'] },
-      { name:'LeakedZone',      url:q=>`/api/leakedzone?term=${q}`,           type:'urls',   key:['urls','titles'] },
-      { name:'FanslyLeaked',    url:q=>`/api/fanslyleaked?term=${q}`,         type:'urls',   key:['urls','titles'] },
-      { name:'GotAnyNudes',     url:q=>`/api/gotanynudes?term=${q}`,          type:'urls',   key:['urls','titles'] },
-      { name:'NSFW247',         url:q=>`/api/nsfw247?term=${q}`,             type:'urls',   key:['urls','titles'] },
-      { name:'HornySimp',       url:q=>`/api/hornysimp?term=${q}`,           type:'urls',   key:['urls','titles'] },
-      { name:'Porntn',          url:q=>`/api/porntn?term=${q}`,              type:'urls',   key:['urls','titles'] },
-      { name:'xxBrits',         url:q=>`/api/xxbrits?term=${q}`,             type:'urls',   key:['urls','titles'] },
-      { name:'BitchesGirls',    url:q=>`/api/bitchesgirls?term=${q}`,        type:'urls',   key:['urls','titles'] },
-      { name:'ThotsLife',       url:q=>`/api/thotslife?term=${q}`,           type:'urls',   key:['urls','titles'] },
-      { name:'Fapello Gallery', url:q=>`/api/fapello-gallery?album_url=${q}`,type:'gallery' },
-      { name:'JPG5 Gallery',    url:q=>`/api/jpg5-gallery?album_url=${q}`,    type:'gallery' }
+    const endpoints=[
+      {name:'Erome Gallery',url:q=>`/api/erome-gallery?query=${q}`,type:'gallery'},
+      {name:'Erome Albums',url:q=>`/api/erome-albums?username=${q}`,type:'albums'},
+      {name:'Bunkr Gallery',url:q=>`/api/bunkr-gallery?query=${q}`,type:'gallery'},
+      {name:'Bunkr Albums',url:q=>`/api/bunkr-albums?query=${q}`,type:'albums'},
+      {name:'NotFans',url:q=>`/api/notfans?search_term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'Influencers',url:q=>`/api/influencers?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'Thothub',url:q=>`/api/thothub?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'DirtyShip',url:q=>`/api/dirtyship?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'PimpBunny',url:q=>`/api/pimpbunny?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'LeakedZone',url:q=>`/api/leakedzone?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'FanslyLeaked',url:q=>`/api/fanslyleaked?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'GotAnyNudes',url:q=>`/api/gotanynudes?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'NSFW247',url:q=>`/api/nsfw247?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'HornySimp',url:q=>`/api/hornysimp?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'Porntn',url:q=>`/api/porntn?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'xxBrits',url:q=>`/api/xxbrits?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'BitchesGirls',url:q=>`/api/bitchesgirls?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'ThotsLife',url:q=>`/api/thotslife?term=${q}`,type:'urls',key:['urls','titles']},
+      {name:'Fapello Gallery',url:q=>`/api/fapello-gallery?album_url=${q}`,type:'gallery'},
+      {name:'JPG5 Gallery',url:q=>`/api/jpg5-gallery?album_url=${q}`,type:'gallery'}
     ];
 
-    let results = JSON.parse(localStorage.getItem('n3xus_results')||'[]');
+    let results=JSON.parse(localStorage.getItem('n3xus_results')||'[]');
 
     document.addEventListener('DOMContentLoaded',()=>{
       initNav(); initFAQ(); initModelsTools(); initBackToTop();
-      telegramBtn.addEventListener('click', ()=> window.open('https://t.me/your_telegram_link','_blank'));
-      discordBtn.addEventListener('click', ()=> window.open('https://discord.gg/your_discord_link','_blank'));
+      if(isAdmin) enableAdminMode();
+      telegramBtn.onclick=()=>window.open('https://t.me/your_telegram_link','_blank');
+      discordBtn.onclick=()=>window.open('https://discord.gg/your_discord_link','_blank');
       if(results.length) renderModels(results);
     });
 
+    window.addEventListener('keydown',e=>{
+      if(e.ctrlKey&&e.key.toLowerCase()==='i'){
+        if(!isAdmin){
+          const pw=prompt('Enter admin password:');
+          if(pw==='cassidy'){ isAdmin=true; sessionStorage.setItem('isAdmin','true'); enableAdminMode(); }
+          else alert('Invalid password');
+        }
+      }
+    });
+
     function initNav(){
-      [menuHome,menuSearch,menuModels,menuFaq,menuTerms].forEach(btn=>{
-        btn.onclick=e=>{
-          e.preventDefault();
-          showSection(btn.id.replace('menu-',''));
-        };
-      });
-      searchForm.addEventListener('submit',async e=>{
-        e.preventDefault();
-        let q=searchIn.value.trim(); if(!q) return;
-        await doSearch(q);
-        renderSearch([results[results.length-1]]);
-        showSection('search');
-      });
+      [menuHome,menuSearch,menuModels,menuFaq,menuTerms].forEach(btn=>btn.onclick=e=>{ e.preventDefault(); showSection(btn.id.replace('menu-','')); });
+      searchForm.onsubmit=async e=>{ e.preventDefault(); let q=searchIn.value.trim(); if(!q) return; await doSearch(q); renderSearch([results[results.length-1]]); showSection('search'); };
+      jpg5Btn.onclick=async ()=>{ let url=jpg5Input.value.trim(); if(!url)return; try{ let res=await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`); let data=await res.json(); let model={name:url,endpoints:[{name:'JPG5 Gallery',type:'gallery',items:data.images}]}; results.push(model); localStorage.setItem('n3xus_results',JSON.stringify(results)); renderSearch([model]); renderModels(results); showSection('search'); }catch{alert('Error fetching JPG5');}};
     }
 
     async function doSearch(term){
       let model={name:term,endpoints:[]};
       for(let ep of endpoints){
         if(ep.name==='JPG5 Gallery') continue;
-        let url=(ep.name==='JPG5 Gallery')? ep.url(term) : ep.url(encodeURIComponent(term));
-        try{
-          let res=await fetch(url),
-              data=await res.json(),
-              items=ep.type==='gallery'? data.images||[] :
-                    ep.type==='albums'? data.albums||[] :
-                    data[ep.key[0]].map((u,i)=>({url:u,title:data[ep.key[1]][i]}));
-          if(items.length) model.endpoints.push({...ep,items});
-        }catch{}
-      }
-      // JPG5: only if it's a URL
-      if(term.startsWith('http')){
-        try{
-          let res=await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`),
-              data=await res.json();
-          if(data.images.length) model.endpoints.push({name:'JPG5 Gallery',type:'gallery',items:data.images});
-        }catch{}
+        let url=ep.name==='JPG5 Gallery'?ep.url(term):ep.url(encodeURIComponent(term));
+        try{ let res=await fetch(url), data=await res.json(); let items=ep.type==='gallery'?data.images||[]:ep.type==='albums'?data.albums||[]:data[ep.key[0]].map((u,i)=>({url:u,title:data[ep.key[1]][i]})); if(items.length) model.endpoints.push({...ep,items}); }catch{};
       }
       results.push(model);
       localStorage.setItem('n3xus_results',JSON.stringify(results));
@@ -435,94 +382,112 @@
 
     function renderModels(list){
       modelsGrid.innerHTML='';
-      for(let m of list){
-        let thumbEp = m.endpoints.find(e=>e.name==='Erome Gallery'),
-            thumb = thumbEp? thumbEp.items[0] : '/static/album-placeholder.png';
-        let card=document.createElement('div');
-        card.className='model-card';
-        card.innerHTML=`
-          <img src="${thumb}" alt="${m.name} thumbnail"/>
-          <div class="info">
-            <h3>${m.name}</h3>
-            <p>${m.endpoints.length} sources</p>
-          </div>`;
+      list.forEach(m=>{
+        let thumbEp=m.endpoints.find(e=>e.name==='Erome Gallery');
+        let thumb=m.thumbOverride|| (thumbEp?thumbEp.items[0]:FALLBACK_THUMB_URL);
+        let card=document.createElement('div'); card.className='model-card';
+        card.innerHTML=`<img src="${thumb}" alt="${m.name} thumbnail"/><div class="info"><h3>${m.name}</h3><p>${m.endpoints.length} sources</p></div>`;
         card.onclick=()=>openGallery(m);
+        if(isAdmin){
+          let adminDiv=document.createElement('div'); adminDiv.className='admin-controls';
+          adminDiv.innerHTML=`<button class="edit-thumb-btn">✏️</button><button class="delete-model-btn">🗑️</button>`;
+          adminDiv.querySelector('.delete-model-btn').onclick=e=>{ e.stopPropagation(); if(confirm('Delete model?')){results=results.filter(x=>x!==m);localStorage.setItem('n3xus_results',JSON.stringify(results));renderModels(results);} };
+          adminDiv.querySelector('.edit-thumb-btn').onclick=e=>{ e.stopPropagation(); let url=prompt('New thumbnail URL:',m.thumbOverride||''); if(url){m.thumbOverride=url;localStorage.setItem('n3xus_results',JSON.stringify(results));renderModels(results);} };
+          card.appendChild(adminDiv);
+        }
         modelsGrid.appendChild(card);
-      }
+      });
     }
 
     function renderSearch(list){
       searchGrid.innerHTML='';
-      for(let m of list){
-        let thumbEp = m.endpoints.find(e=>e.name==='Erome Gallery'),
-            thumb = thumbEp? thumbEp.items[0] : '/static/album-placeholder.png';
-        let card=document.createElement('div');
-        card.className='model-card';
-        card.innerHTML=`
-          <img src="${thumb}" alt="${m.name} thumbnail"/>
-          <div class="info">
-            <h3>${m.name}</h3>
-            <p>${m.endpoints.length} sources</p>
-          </div>`;
+      list.forEach(m=>{
+        let thumbEp=m.endpoints.find(e=>e.name==='Erome Gallery');
+        let thumb=m.thumbOverride|| (thumbEp?thumbEp.items[0]:FALLBACK_THUMB_URL);
+        let card=document.createElement('div'); card.className='model-card';
+        card.innerHTML=`<img src="${thumb}" alt="${m.name} thumbnail"/><div class="info"><h3>${m.name}</h3><p>${m.endpoints.length} sources</p></div>`;
         card.onclick=()=>openGallery(m);
+        if(isAdmin){
+          let adminDiv=document.createElement('div'); adminDiv.className='admin-controls';
+          adminDiv.innerHTML=`<button class="edit-thumb-btn">✏️</button><button class="delete-model-btn">🗑️</button>`;
+          adminDiv.querySelector('.delete-model-btn').onclick=e=>{ e.stopPropagation(); if(confirm('Delete model?')){results=results.filter(x=>x!==m);localStorage.setItem('n3xus_results',JSON.stringify(results));renderModels(results);} };
+          adminDiv.querySelector('.edit-thumb-btn').onclick=e=>{ e.stopPropagation(); let url=prompt('New thumbnail URL:',m.thumbOverride||''); if(url){m.thumbOverride=url;localStorage.setItem('n3xus_results',JSON.stringify(results));renderModels(results);} };
+          card.appendChild(adminDiv);
+        }
         searchGrid.appendChild(card);
-      }
+      });
     }
 
     function openGallery(model){
-      showSection(''); galleryView.style.display='block';
+      showSection('');
+      galleryView.style.display='block';
       modelTitle.textContent=model.name;
       albumLinks.innerHTML='';
-      for(let ep of model.endpoints){
+      model.endpoints.forEach(ep=>{
         let sec=document.createElement('div'); sec.className='endpoint-section';
         sec.innerHTML=`<h3>${ep.name} (${ep.items.length})</h3>`;
         let grid=document.createElement('div'); grid.className='items-grid';
-        for(let item of ep.items){
-          let url=typeof item==='string'? item : item.url,
-              thumb=(ep.name==='Erome Gallery'? url : (model.endpoints.find(e=>e.name==='Erome Gallery')?.items[0]||url));
+        ep.items.forEach(item=>{
+          let url=typeof item==='string'?item:item.url;
+          let thumb=ep.name==='Erome Gallery'?url:(model.endpoints.find(e=>e.name==='Erome Gallery')?.items[0]||FALLBACK_THUMB_URL);
           let a=document.createElement('a'); a.href=url; a.target='_blank';
           let img=document.createElement('img'); img.src=thumb; img.alt=ep.name;
           a.appendChild(img); grid.appendChild(a);
-        }
+        });
         sec.appendChild(grid); albumLinks.appendChild(sec);
-      }
+      });
     }
 
-    backBtn.onclick=()=> showSection('search');
+    backBtn.onclick=()=>showSection('search');
 
     function initModelsTools(){
-      'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter=>{
-        let btn=document.createElement('button');
-        btn.textContent=letter;
-        btn.onclick=()=>filterModels(letter);
-        azList.appendChild(btn);
-      });
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(l=>{let b=document.createElement('button');b.textContent=l;b.onclick=()=>filterModels(l);azList.appendChild(b);});
       filterIn.oninput=()=>filterModels(filterIn.value.trim());
     }
 
     function filterModels(f){
-      for(let card of modelsGrid.children){
-        let name=card.querySelector('h3').textContent.toLowerCase();
-        card.style.display = f.length===1?
-          (name.startsWith(f.toLowerCase())?'block':'none') :
-          (f.length>1? (name.includes(f.toLowerCase())?'block':'none') : 'block');
-      }
+      Array.from(modelsGrid.children).forEach(c=>{let n=c.querySelector('h3').textContent.toLowerCase();c.style.display=f.length===1? (n.startsWith(f.toLowerCase())?'block':'none') :(f.length>1?(n.includes(f.toLowerCase())?'block':'none'):'block');});
     }
 
-    function initFAQ(){
-      faqBtns.forEach(btn=>btn.onclick=()=>{
-        let pan=btn.nextElementSibling, ic=btn.querySelector('i');
-        document.querySelectorAll('.panel').forEach(p=>p.style.maxHeight=null);
-        document.querySelectorAll('.accordion-item i').forEach(i=>i.classList.replace('fa-minus','fa-plus'));
-        if(!pan.style.maxHeight){
-          pan.style.maxHeight=pan.scrollHeight+'px';
-          ic.classList.replace('fa-plus','fa-minus');
+    function initFAQ(){ faqBtns.forEach(btn=>btn.onclick=()=>{let p=btn.nextElementSibling,i=btn.querySelector('i');document.querySelectorAll('.panel').forEach(x=>x.style.maxHeight=null);document.querySelectorAll('.accordion-item i').forEach(x=>x.classList.replace('fa-minus','fa-plus'));if(!p.style.maxHeight){p.style.maxHeight=p.scrollHeight+'px';i.classList.replace('fa-plus','fa-minus');}})); }
+    function initBackToTop(){ backToTop.onclick=()=>window.scrollTo({top:0,behavior:'smooth'}); }
+
+    // Admin upload as provided
+    async function uploadNewModel(){
+      const name=document.getElementById("new-model-name").value.trim();
+      const zipFile=document.getElementById("new-model-zip").files[0];
+      if(!name) return alert("Enter a model name.");
+      if(!zipFile) return alert("Select a ZIP file.");
+      try {
+        const zip=await JSZip.loadAsync(zipFile);
+        const entries=Object.values(zip.files)
+          .filter(f=>!f.dir&&/\.(jpe?g|png|gif|mp4|webm)$/i.test(f.name));
+        if(entries.length<20) return alert("ZIP must contain at least 20 images/videos.");
+        const urls=[];
+        for(const file of entries){
+          const blob=await file.async("blob");
+          urls.push(URL.createObjectURL(blob));
         }
-      });
+        const model={name, endpoints:[{name:'Admin Upload',type:'gallery',items:urls}]};
+        results.push(model);
+        localStorage.setItem('n3xus_results',JSON.stringify(results));
+        alert("Model uploaded!");
+        renderModels(results);
+      } catch(err){ console.error(err); alert("Error processing ZIP."); }
     }
 
-    function initBackToTop(){
-      backToTop.onclick=()=>window.scrollTo({top:0,behavior:'smooth'});
+    function enableAdminMode(){
+      const adminDiv=document.createElement('div');
+      adminDiv.id='admin-panel';
+      adminDiv.style.color='var(--accent)';
+      adminDiv.innerHTML=`
+        <h3>Admin Panel</h3>
+        <input id="new-model-name" placeholder="New model name…" />
+        <input id="new-model-zip" type="file" accept=".zip" />
+        <button id="upload-btn">Upload Model ZIP</button>
+      `;
+      document.querySelector('.models-section').prepend(adminDiv);
+      document.getElementById('upload-btn').onclick=uploadNewModel;
     }
   </script>
 </body>
