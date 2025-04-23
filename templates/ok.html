@@ -132,6 +132,21 @@
     }
     .content { flex:1; overflow-y:auto; padding-top:20px; }
 
+    /* Status Message */
+    #status-message {
+      display: none;
+      text-align: center;
+      padding: 10px 20px;
+      font-size: 18px;
+      color: var(--accent);
+      text-shadow: 0 0 8px var(--accent-hover);
+      animation: glow 1.5s ease-in-out infinite;
+    }
+    @keyframes glow {
+      0%, 100% { text-shadow: 0 0 5px var(--accent), 0 0 10px var(--accent-hover); }
+      50% { text-shadow: 0 0 20px var(--accent-hover), 0 0 30px var(--accent); }
+    }
+
     /* Search Section */
     #search-section { display:none; padding:20px 40px; }
     .search-cards { display:grid; gap:16px; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
@@ -295,6 +310,9 @@
     </header>
 
     <div class="content">
+      <!-- Status message -->
+      <div id="status-message"></div>
+
       <!-- Home Intro -->
       <section id="intro">
         <h2>Welcome to N3XUS LEAKS</h2>
@@ -331,7 +349,7 @@
       <section id="faq" class="accordion">
         <div class="accordion-item">
           <button>What does this site do? <i class="fas fa-plus"></i></button>
-          <div class="panel"><p>Aggregates publicly-available galleries from multiple sources. Search any term to see results.</p></div>
+          <div class="panel"><p>Aggregates publicly-available galleries from multiple sources. Search any term to see results.</p></div>  
         </div>
         <div class="accordion-item">
           <button>How does offline work? <i class="fas fa-plus"></i></button>
@@ -390,6 +408,16 @@
   </div>
 
   <script>
+    // Utility to show / hide status message
+    function showStatus(msg) {
+      const status = document.getElementById('status-message');
+      status.textContent = msg;
+      status.style.display = 'block';
+    }
+    function clearStatus() {
+      document.getElementById('status-message').style.display = 'none';
+    }
+
     // Constants & state
     const DEFAULT_THUMB = 'https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png';
     let results = JSON.parse(localStorage.getItem('n3xus_results') || '[]');
@@ -458,7 +486,6 @@
       initModelsTools();
       initBackToTop();
       loadTabIcon();
-      // explicitly show Home at start
       showSection('home');
 
       telegramBtn.addEventListener('click', () => window.open('https://t.me/your_telegram_link', '_blank'));
@@ -501,12 +528,24 @@
         e.preventDefault();
         let q = searchIn.value.trim();
         if (!q) return;
-        alert(`Fetching leaks for ${q}. Please check the Search section for results and wait a moment.`);
+        // show initial fetching message
+        showStatus(`Fetching leaks for ${q}…`);
         let success = await doSearch(q);
-        if (!success) return;
-        renderSearch([ results[results.length - 1] ]);
+        if (!success) {
+          showStatus(`No leaks found for ${q}`);
+          return;
+        }
+        // build little notices
+        const model = results[results.length - 1];
+        const notices = model.endpoints
+          .map(ep => `${ep.name.toLowerCase()}: ${ep.items.length}`)
+          .join(' • ');
+        showStatus(notices);
+        // render and then clear message
+        renderSearch([ model ]);
         renderModels(results);
         showSection('search');
+        clearStatus();
       });
     }
 
@@ -534,7 +573,6 @@
           console.error('Error fetching', ep.name, err);
         }
       }
-      // JPG5 fallback if user pasted an album URL
       if (term.startsWith('http')) {
         try {
           let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`);
@@ -548,7 +586,6 @@
         }
       }
       if (model.endpoints.length === 0) {
-        alert(`No leaks found for ${term}`);
         return false;
       }
       results.push(model);
@@ -755,17 +792,24 @@
     async function fetchJPG5Album() {
       let url = jpg5Input.value.trim();
       if (!url) return alert('Enter a JPG5 album URL.');
+      showStatus(`Fetching leaks for ${url}…`);
       try {
         let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         let data = await res.json();
-        if (!data.images.length) return alert(`No leaks found for ${url}`);
+        if (!data.images.length) {
+          showStatus(`No leaks found for ${url}`);
+          return;
+        }
         let model = { name: url, endpoints: [ { name: 'JPG5 Gallery', type: 'gallery', items: data.images } ] };
         results.push(model);
         localStorage.setItem('n3xus_results', JSON.stringify(results));
+        const notices = model.endpoints.map(ep => `${ep.name.toLowerCase()}: ${ep.items.length}`).join(' • ');
+        showStatus(notices);
         renderSearch([model]);
         renderModels(results);
         showSection('search');
+        clearStatus();
       } catch (err) {
         console.error(err);
         alert('Error fetching JPG5 album.');
@@ -823,7 +867,6 @@
       });
       filterIn.addEventListener('input', () => filterModels(filterIn.value.trim()));
     }
-
     function filterModels(f) {
       for (let card of modelsGrid.children) {
         let name = card.querySelector('h3').textContent.toLowerCase();
