@@ -625,13 +625,16 @@ async def get_erome_gallery(query: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Bunkr Albums: use `query` param to match front-end
 @app.get("/api/bunkr-albums")
-async def get_bunkr_albums(username: str):
+async def get_bunkr_albums(query: str):
     try:
-        return {"albums": await get_all_album_links_from_search(username)}
+        albums = await get_all_album_links_from_search(query)
+        return {"albums": albums}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Bunkr Gallery: already expects `query`
 @app.get("/api/bunkr-gallery")
 async def get_bunkr_gallery(query: str):
     try:
@@ -647,6 +650,7 @@ async def get_bunkr_gallery(query: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Fapello Gallery: no changes needed, but ensure it's registered
 @app.get("/api/fapello-gallery")
 async def get_fapello_gallery(album_url: str):
     if "fapello.com" not in album_url:
