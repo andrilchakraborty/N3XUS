@@ -4,16 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>N3XUS LEAKS</title>
-  <!-- Tab icon, set dynamically via admin -->
-  <link rel="icon" id="favicon" href=""/>
-
   <!-- Google Font -->
   <link href="https://fonts.googleapis.com/css?family=Montserrat:400,600,700&display=swap" rel="stylesheet"/>
   <!-- Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
   <!-- JSZip for admin uploads -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
-
   <style>
     :root {
       --bg-dark: #0d0d0f;
@@ -27,96 +23,233 @@
     * { margin:0; padding:0; box-sizing:border-box; font-family:'Montserrat',sans-serif; }
     body { display:flex; min-height:100vh; background:var(--bg-dark); color:var(--text-light); }
     a { text-decoration:none; color:inherit; }
-    button { border:2px solid var(--accent); border-radius:6px; background:none; color:var(--accent); cursor:pointer; transition: box-shadow .2s, background .2s, color .2s; }
-    button:hover { box-shadow: 0 0 8px var(--accent-hover); background:var(--accent); color:#fff; }
 
-    .sidebar { position:fixed; top:0; left:0; width:var(--sidebar-width); height:100%; background:var(--bg-darker); display:flex; flex-direction:column; padding-top:20px; }
+    /* Global button styles */
+    button {
+      border:2px solid var(--accent);
+      border-radius:6px;
+      background:none;
+      color:var(--accent);
+      cursor:pointer;
+      transition: box-shadow .2s, background .2s, color .2s;
+    }
+    button:hover {
+      box-shadow: 0 0 8px var(--accent-hover);
+      background:var(--accent);
+      color:#fff;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      position:fixed; top:0; left:0;
+      width:var(--sidebar-width); height:100%;
+      background:var(--bg-darker);
+      display:flex; flex-direction:column; padding-top:20px;
+    }
     .sidebar ul { list-style:none; padding:0 20px; }
     .sidebar li + li { margin-top:12px; }
-    .sidebar li a { display:flex; align-items:center; padding:12px 16px; border-radius:4px; transition: background .2s; }
-    .sidebar li a:hover, .sidebar li a.active { background: rgba(230,0,126,0.1); }
+    .sidebar li a {
+      display:flex; align-items:center;
+      padding:12px 16px; border-radius:4px;
+      transition: background .2s;
+    }
+    .sidebar li a:hover, .sidebar li a.active {
+      background: rgba(230,0,126,0.1);
+    }
     .sidebar i { margin-right:12px; font-size:18px; }
 
-    .main { margin-left:var(--sidebar-width); flex:1; display:flex; flex-direction:column; }
-    .header { height:60px; background:var(--bg-darker); display:flex; align-items:center; justify-content:space-between; padding:0 20px; }
-    #search-controls { display:flex; align-items:center; }
-    #search-form { display:flex; align-items:center; }
-    #search-input, #jpg5-input { padding:6px 10px; font-size:14px; border:none; border-radius:4px; width:200px; }
-    #jpg5-input { margin-left:8px; width:250px; }
-    #search-btn, #jpg5-btn { padding:6px 12px; border-radius:4px; background:var(--accent); color:#fff; margin-left:4px; }
-    .header-btn { display:flex; align-items:center; justify-content:center; width:44px; height:44px; border-radius:6px; font-size:22px; margin-left:8px; }
+    /* Main panel */
+    .main {
+      margin-left:var(--sidebar-width);
+      flex:1; display:flex; flex-direction:column;
+    }
 
-    #intro { padding:60px 40px; text-align:center; animation: fadeIn 1.5s ease-in; }
-    #intro h2 { font-size:36px; color:var(--accent); margin-bottom:16px; animation: slideDown 1s ease-out; }
-    #intro p { color:var(--text-muted); line-height:1.5; max-width:600px; margin:0 auto; }
+    /* Header */
+    .header {
+      height:60px; background:var(--bg-darker);
+      display:flex; align-items:center;
+      justify-content:space-between; padding:0 20px;
+    }
+    #search-controls { display:flex; align-items:center; }
+    #search-form {
+      display:flex; align-items:center;
+    }
+    #search-input, #jpg5-input {
+      padding:6px 10px; font-size:14px;
+      border:none; border-radius:4px; width:200px;
+    }
+    #jpg5-input { margin-left:8px; width:250px; }
+    #search-btn, #jpg5-btn {
+      padding:6px 12px; border-radius:4px;
+      background:var(--accent); color:#fff; margin-left:4px;
+    }
+
+    /* Telegram & Discord buttons */
+    .header-btn {
+      display:flex;
+      align-items:center; justify-content:center;
+      width:44px; height:44px;
+      border-radius:6px;
+      font-size:22px; margin-left:8px;
+    }
+
+    /* Intro */
+    #intro {
+      padding:60px 40px; text-align:center;
+      animation: fadeIn 1.5s ease-in;
+    }
+    #intro h2 {
+      font-size:36px; color:var(--accent);
+      margin-bottom:16px;
+      animation: slideDown 1s ease-out;
+    }
+    #intro p {
+      color:var(--text-muted); line-height:1.5; max-width:600px; margin:0 auto;
+    }
     @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
     @keyframes slideDown { from { transform:translateY(-20px); opacity:0; } to { transform:translateY(0); opacity:1; } }
 
-    #img-context-menu { position: fixed; background: #112240; border: 1px solid #233554; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.7); color: #ccd6f6; display: none; z-index: 10000; }
-    #img-context-menu div { padding: 8px 12px; cursor: pointer; white-space: nowrap; }
-    #img-context-menu div:hover { background: #233554; }
+    /* Context menu */
+    #img-context-menu {
+      position: fixed;
+      background: #112240;
+      border: 1px solid #233554;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.7);
+      color: #ccd6f6;
+      display: none;
+      z-index: 10000;
+    }
+    #img-context-menu div {
+      padding: 8px 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #img-context-menu div:hover {
+      background: #233554;
+    }
     .content { flex:1; overflow-y:auto; padding-top:20px; }
 
+    /* Search Section */
     #search-section { display:none; padding:20px 40px; }
     .search-cards { display:grid; gap:16px; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
 
+    /* Models Section */
     .models-section { padding:20px 40px; display:none; }
-    #model-list-tools { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
-    #model-filter-input { padding:6px 10px; font-size:14px; border:none; border-radius:4px; width:200px; }
-    #model-az-list button { background:none; border:none; color:var(--accent); cursor:pointer; font-size:14px; padding:4px 6px; border-radius:4px; transition:background .2s; }
+    #model-list-tools {
+      display:flex; align-items:center; flex-wrap:wrap;
+      gap:8px; margin-bottom:16px;
+    }
+    #model-filter-input {
+      padding:6px 10px; font-size:14px; border:none;
+      border-radius:4px; width:200px;
+    }
+    #model-az-list button {
+      background:none; border:none; color:var(--accent);
+      cursor:pointer; font-size:14px; padding:4px 6px;
+      border-radius:4px; transition:background .2s;
+    }
     #model-az-list button:hover { background:rgba(230,0,126,0.1); }
 
     .model-cards { display:grid; gap:16px; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
-    .model-card { position: relative; background:var(--bg-darker); border-radius:4px; overflow:hidden; cursor:pointer; transition:transform .1s; }
-    .model-card:hover { transform:scale(1.02); }
-    .model-card img { width:100%; height:100px; object-fit:cover; }
-    .model-card .info { padding:8px; text-align:center; }
-    .model-card .info h3 { font-size:14px; margin-bottom:4px; color:var(--text-light); }
-    .model-card .info p { font-size:12px; color:var(--text-muted); }
-    .delete-model-btn {
-      position:absolute; top:8px; right:8px; background:none; border:none; font-size:16px; color:var(--accent);
-      padding:4px; border-radius:50%; transition:background .2s;
+    .model-card {
+      background:var(--bg-darker); border-radius:4px; overflow:hidden;
+      cursor:pointer; transition:transform .1s;
     }
-    .delete-model-btn:hover { background:rgba(230,0,126,0.2); }
+    .model-card:hover { transform:scale(1.02); }
+    .model-card img {
+      width:100%; height:100px; object-fit:cover;
+    }
+    .model-card .info {
+      padding:8px; text-align:center;
+    }
+    .model-card .info h3 {
+      font-size:14px; margin-bottom:4px; color:var(--text-light);
+    }
+    .model-card .info p {
+      font-size:12px; color:var(--text-muted);
+    }
 
+    /* Gallery subview */
     #gallery-view { display:none; padding:20px 40px; }
-    #back-btn { background:none; border:none; color:var(--accent); cursor:pointer; margin-bottom:16px; font-size:14px; }
+    #back-btn {
+      background:none; border:none; color:var(--accent);
+      cursor:pointer; margin-bottom:16px; font-size:14px;
+    }
     .endpoint-section { margin-bottom:24px; }
     .endpoint-section h3 { font-size:18px; margin-bottom:8px; color:var(--accent); display:inline-block; }
-    .items-grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); }
-    .items-grid .item-container { position:relative; }
-    .items-grid img { width:100%; height:auto; border-radius:4px; display:block; }
-    .item-btn {
-      position:absolute; top:4px; right:4px; background:none; border:none; font-size:14px; color:var(--accent);
-      padding:2px 4px; border-radius:4px; transition:background .2s;
-      margin-left:4px;
+    .items-grid {
+      display:grid; gap:16px;
+      grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
     }
-    .item-btn:hover { background:rgba(230,0,126,0.2); }
+    .items-grid img {
+      width:100%; height:auto; border-radius:4px; display:block;
+    }
 
+    /* FAQ Accordion */
     .accordion { max-width:800px; margin:40px auto; }
-    .accordion-item { background:var(--bg-darker); border-radius:4px; margin-bottom:16px; overflow:hidden; }
-    .accordion-item button { width:100%; background:none; border:none; color:var(--text-light); text-align:left; padding:20px; font-size:16px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; transition: background .2s; }
+    .accordion-item {
+      background:var(--bg-darker); border-radius:4px;
+      margin-bottom:16px; overflow:hidden;
+    }
+    .accordion-item button {
+      width:100%; background:none; border:none;
+      color:var(--text-light); text-align:left;
+      padding:20px; font-size:16px;
+      display:flex; justify-content:space-between;
+      align-items:center; cursor:pointer;
+      transition: background .2s;
+    }
     .accordion-item button:hover { background:rgba(255,255,255,0.05); }
-    .accordion-item button i { font-size:20px; transition:transform .3s; }
-    .panel { max-height:0; overflow:hidden; transition:max-height .3s ease; background:var(--bg-dark); }
+    .accordion-item button i {
+      font-size:20px; transition:transform .3s;
+    }
+    .panel {
+      max-height:0; overflow:hidden;
+      transition:max-height .3s ease;
+      background:var(--bg-dark);
+    }
     .panel p { padding:0 20px 20px; color:var(--text-muted); }
 
-    #terms { max-width:800px; margin:40px auto; color:var(--text-muted); line-height:1.5; padding:0 20px; }
+    /* Terms */
+    #terms {
+      max-width:800px; margin:40px auto;
+      color:var(--text-muted); line-height:1.5; padding:0 20px;
+    }
 
-    .footer { background:var(--bg-darker); padding:40px 20px; color:var(--text-muted); display:flex; justify-content:space-between; flex-wrap:wrap; }
+    /* Footer */
+    .footer {
+      background:var(--bg-darker);
+      padding:40px 20px; color:var(--text-muted);
+      display:flex; justify-content:space-between; flex-wrap:wrap;
+    }
     .footer .left { max-width:600px; }
     .footer .left h3 { color:#fff; margin-bottom:8px; }
     .footer .links { list-style:none; display:flex; flex-wrap:wrap; margin-top:16px; }
     .footer .links li { margin-right:16px; margin-bottom:8px; }
     .footer .payments i { margin-right:12px; font-size:24px; }
 
-    .back-to-top { position:fixed; bottom:20px; right:50%; transform:translateX(50%); background:var(--accent); width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; cursor:pointer; transition:background .2s; }
+    /* Back to top */
+    .back-to-top {
+      position:fixed; bottom:20px; right:50%;
+      transform:translateX(50%);
+      background:var(--accent); width:48px; height:48px;
+      border-radius:50%; display:flex; align-items:center;
+      justify-content:center; color:#fff; cursor:pointer;
+      transition:background .2s;
+    }
     .back-to-top:hover { background:var(--accent-hover); }
 
+    /* Admin panel */
     #admin-panel {
-      display:none; position:fixed; top:60px; right:20px;
-      background:var(--bg-darker); padding:20px; border:2px solid var(--accent);
-      border-radius:6px; z-index:1000; width:260px;
+      display:none;
+      position:fixed; top:60px; right:20px;
+      background:var(--bg-darker);
+      padding:20px;
+      border:2px solid var(--accent);
+      border-radius:6px;
+      z-index:1000;
+      width:260px;
     }
     #admin-panel h3 { margin-bottom:12px; color:var(--accent); }
     #admin-panel input { width:100%; padding:6px 10px; margin-bottom:8px; border:none; border-radius:4px; }
@@ -229,7 +362,6 @@
       </div>
     </footer>
   </div>
-
   <div id="img-context-menu">
     <div data-action="copy-image">Copy Image</div>
     <div data-action="copy-url">Copy Image URL</div>
@@ -243,9 +375,6 @@
     <input id="new-model-name" type="text" placeholder="Model Name" />
     <input id="new-model-zip" type="file" accept=".zip" />
     <button id="upload-btn">Upload Model</button>
-    <hr style="border-color:var(--accent);" />
-    <input id="favicon-url" type="text" placeholder="Tab Icon URL" />
-    <button id="set-favicon-btn">Set Tab Icon</button>
   </div>
 
   <script>
@@ -282,10 +411,7 @@
           jpg5Input      = document.getElementById('jpg5-input'),
           jpg5Btn        = document.getElementById('jpg5-btn'),
           uploadBtn      = document.getElementById('upload-btn'),
-          adminPanel     = document.getElementById('admin-panel'),
-          faviconLink    = document.getElementById('favicon'),
-          setFaviconBtn  = document.getElementById('set-favicon-btn'),
-          faviconInput   = document.getElementById('favicon-url');
+          adminPanel     = document.getElementById('admin-panel');
 
     // All endpoints
     const endpoints = [
@@ -317,12 +443,6 @@
       discordBtn.addEventListener('click', ()=> window.open('https://discord.gg/your_discord_link','_blank'));
       jpg5Btn.addEventListener('click', fetchJPG5Album);
       uploadBtn.addEventListener('click', uploadNewModel);
-      setFaviconBtn.addEventListener('click', () => {
-        const url = faviconInput.value.trim();
-        if (!url) return alert('Enter a valid image URL for the tab icon.');
-        faviconLink.href = url;
-        alert('Favicon updated!');
-      });
       if (results.length) {
         renderModels(results);
       }
@@ -359,6 +479,7 @@
           }
         }catch(err){ console.error('Error fetching', ep.name, err); }
       }
+      // JPG5 endpoint if input was URL
       if(term.startsWith('http')){
         try{
           let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`), data = await res.json();
@@ -477,68 +598,19 @@
 
         // Image grid
         let grid = document.createElement('div'); grid.className = 'items-grid';
-        ep.items.forEach((item, ii) => {
-          let url = (typeof item === 'string') ? item : item.url;
-          let thumb = (ep.thumbnail) ? ep.thumbnail : url;
-          let container = document.createElement('div');
-          container.className = 'item-container';
-
-          let link = document.createElement('a');
-          link.href = url; link.target = '_blank';
-          let img = document.createElement('img');
-          img.src = thumb; img.alt = ep.name;
-          link.appendChild(img);
-          container.appendChild(link);
-
-          if(adminMode){
-            let editBtn = document.createElement('button');
-            editBtn.className = 'item-btn';
-            editBtn.innerHTML = '<i class="fas fa-edit"></i>';
-            editBtn.onclick = () => {
-              let newUrl = prompt('New image URL:', url);
-              if(newUrl){
-                if(typeof item === 'string'){
-                  ep.items[ii] = newUrl;
-                } else {
-                  item.url = newUrl;
-                }
-                cleanupEmpty(model);
-                localStorage.setItem('n3xus_results', JSON.stringify(results));
-                openGallery(model);
-              }
-            };
-            let deleteBtn = document.createElement('button');
-            deleteBtn.className = 'item-btn';
-            deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
-            deleteBtn.onclick = () => {
-              if(confirm('Delete this image?')){
-                ep.items.splice(ii,1);
-                cleanupEmpty(model);
-                localStorage.setItem('n3xus_results', JSON.stringify(results));
-                openGallery(model);
-              }
-            };
-            container.appendChild(editBtn);
-            container.appendChild(deleteBtn);
-          }
-
-          grid.appendChild(container);
-        });
+        for(let item of ep.items){
+          let url = item.url || item;
+          let thumb = ep.name==='Erome Gallery'
+                     ? url
+                     : (ep.thumbnail || DEFAULT_THUMB);
+          let a = document.createElement('a'); a.href=url; a.target='_blank';
+          let img = document.createElement('img'); img.src=thumb; img.alt=ep.name;
+          a.appendChild(img);
+          grid.appendChild(a);
+        }
         sec.appendChild(grid);
         albumLinks.appendChild(sec);
-      });
-    }
-
-    // Remove empty albums and models when needed
-    function cleanupEmpty(model){
-      // Remove any endpoint with zero items
-      model.endpoints = model.endpoints.filter(e=>e.items && e.items.length);
-      // If model has no endpoints, remove it
-      if(model.endpoints.length === 0){
-        let mi = results.indexOf(model);
-        if(mi !== -1) results.splice(mi,1);
       }
-      localStorage.setItem('n3xus_results', JSON.stringify(results));
     }
 
     backBtn.onclick = () => showSection('search');
@@ -577,7 +649,6 @@
         if(pwd==='cassidy'){
           adminMode = true;
           adminPanel.style.display='block';
-          renderModels(results);
           alert('Admin mode enabled.');
         } else alert('Incorrect password.');
       }
@@ -642,3 +713,4 @@
   </script>
 </body>
 </html>
+
