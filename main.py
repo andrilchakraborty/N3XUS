@@ -1,770 +1,516 @@
-import os
-import asyncio
-import aiohttp
-import re
-import json
-import urllib.parse
-import uvicorn
-from urllib.parse import urljoin
-from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from starlette.middleware.base import BaseHTTPMiddleware
-from typing import List, Tuple
-
-# ---- Global constants ----
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-
-# ---- FastAPI setup ----
-app = FastAPI()
-total_visits = 0
-active_connections = set()
-
-class StatsMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        global total_visits
-        total_visits += 1
-        response = await call_next(request)
-        return response
-
-app.add_middleware(StatsMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
-
-# ---- Root endpoint ----
-@app.get("/")
-async def read_index(request: Request):
-    return templates.TemplateResponse("ok.html", {"request": request})
-
-# ---- Helper functions ----
-def parse_links_and_titles(page_content: str, pattern: str, title_class: str):
-    soup = BeautifulSoup(page_content, "html.parser")
-    links = [a["href"] for a in soup.find_all("a", href=True) if re.match(pattern, a["href"])]
-    titles = [span.get_text() for span in soup.find_all("span", class_=title_class)]
-    return links, titles
-
-async def get_webpage_content(url: str, session: aiohttp.ClientSession):
-    async with session.get(url, allow_redirects=True) as response:
-        text = await response.text()
-        return text, str(response.url), response.status
-
-# ---- Existing scrapers: Erome, Bunkr, Fapello, JPG5 ----
-
-def extract_album_links(page_content: str) -> List[str]:
-    soup = BeautifulSoup(page_content, "html.parser")
-    links = set()
-    for a in soup.find_all("a", class_="album-link"):
-        href = a.get("href")
-        if href and href.startswith("https://www.erome.com/a/"):
-            links.add(href)
-    return list(links)
-
-async def fetch_all_album_pages(username: str, max_pages: int = 10) -> List[str]:
-    all_links = set()
-    async with aiohttp.ClientSession() as session:
-        for page in range(1, max_pages + 1):
-            search_url = f"https://www.erome.com/search?q={urllib.parse.quote(username)}&page={page}"
-            text, _, status = await get_webpage_content(search_url, session)
-            if status != 200 or not text:
-                break
-            for link in extract_album_links(text):
-                all_links.add(link)
-    return list(all_links)
-
-async def fetch_image_urls(album_url: str, session: aiohttp.ClientSession) -> List[str]:
-    page_content, base_url, _ = await get_webpage_content(album_url, session)
-    soup = BeautifulSoup(page_content, "html.parser")
-    return [
-        urljoin(base_url, img["data-src"])
-        for img in soup.find_all("div", class_="img")
-        if img.get("data-src")
-    ]
-
-async def fetch_all_erome_image_urls(album_urls: List[str]) -> List[str]:
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
-        tasks = [fetch_image_urls(url, session) for url in album_urls]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-    urls = {u for res in results if isinstance(res, list) for u in res if "/thumb/" not in u}
-    return list(urls)
-
-async def get_album_links_from_search(username: str, page: int = 1):
-    search_url = f"https://bunkr-albums.io/?search={urllib.parse.quote(username)}&page={page}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(search_url) as resp:
-            if resp.status != 200:
-                return []
-            text = await resp.text()
-    links, titles = parse_links_and_titles(text, r"^https://bunkr\.cr/a/.*", "album-title")
-    return [{"url": u, "title": t} for u, t in zip(links, titles)]
-
-async def get_all_album_links_from_search(username: str):
-    albums, page = [], 1
-    while True:
-        page_albums = await get_album_links_from_search(username, page)
-        if not page_albums:
-            break
-        albums.extend(page_albums)
-        # detect next page
-        text, _, _ = await get_webpage_content(
-            f"https://bunkr-albums.io/?search={urllib.parse.quote(username)}&page={page}",
-            aiohttp.ClientSession(),
-        )
-        soup = BeautifulSoup(text, "html.parser")
-        nxt = soup.find("a", href=re.compile(rf"\?search={re.escape(username)}&page={page+1}"), class_="btn btn-sm btn-main")
-        if not nxt:
-            break
-        page += 1
-    return albums
-
-async def get_image_links_from_album(album_url: str, session: aiohttp.ClientSession):
-    async with session.get(album_url) as resp:
-        if resp.status != 200:
-            return []
-        text = await resp.text()
-    soup = BeautifulSoup(text, "html.parser")
-    out = []
-    for a in soup.find_all("a", attrs={"aria-label": "download"}, href=True):
-        href = a["href"]
-        if href.startswith("/f/"):
-            out.append("https://bunkr.cr" + href)
-        elif href.startswith("https://bunkr.cr/f/"):
-            out.append(href)
-    return out
-
-async def get_image_url_from_link(link: str, session: aiohttp.ClientSession):
-    async with session.get(link) as resp:
-        if resp.status != 200:
-            return None
-        text = await resp.text()
-    soup = BeautifulSoup(text, "html.parser")
-    img = soup.find("img", class_=lambda c: c and "object-cover" in c)
-    return img.get("src") if img else None
-
-async def validate_url(url: str, session: aiohttp.ClientSession):
-    try:
-        async with session.get(url, headers={"Range": "bytes=0-0"}, allow_redirects=True) as r:
-            if r.status == 200:
-                return url
-    except:
-        pass
-    return None
-
-thumb_pattern = re.compile(r"/thumb/")
-
-async def fetch_bunkr_gallery_images(username: str) -> List[str]:
-    async with aiohttp.ClientSession() as session:
-        albums = await get_all_album_links_from_search(username)
-        tasks = []
-        for alb in albums:
-            for link in await get_image_links_from_album(alb["url"], session):
-                tasks.append(get_image_url_from_link(link, session))
-        results = await asyncio.gather(*tasks)
-        valid = [u for u in results if u and not thumb_pattern.search(u)]
-        validated = await asyncio.gather(*(validate_url(u, session) for u in valid))
-        return list({u for u in validated if u})
-
-async def fetch_fapello_page_media(page_url: str, session: aiohttp.ClientSession, username: str) -> dict:
-    try:
-        content, base, status = await get_webpage_content(page_url, session)
-        if status != 200:
-            return {"images": [], "videos": []}
-        soup = BeautifulSoup(content, "html.parser")
-        imgs = [img.get("src") or img.get("data-src")
-                for img in soup.find_all("img")
-                if img.get("src", "").startswith(f"https://fapello.com/content/") and f"/{username}/" in img.get("src", "")]
-        vids = [v["src"] for v in soup.find_all("source", type="video/mp4", src=True)
-                if f"/{username}/" in v["src"]]
-        return {"images": list(set(imgs)), "videos": list(set(vids))}
-    except:
-        return {"images": [], "videos": []}
-
-async def fetch_fapello_album_media(album_url: str) -> dict:
-    media = {"images": [], "videos": []}
-    parsed = urllib.parse.urlparse(album_url)
-    username = parsed.path.strip("/").split("/")[0]
-    async with aiohttp.ClientSession(headers={**HEADERS, "Referer": album_url}) as session:
-        content, base, status = await get_webpage_content(album_url, session)
-        if status != 200:
-            return media
-        soup = BeautifulSoup(content, "html.parser")
-        pages = {urllib.parse.urljoin(base, a["href"])
-                 for a in soup.find_all("a", href=True)
-                 if urllib.parse.urljoin(base, a["href"]).startswith(album_url) and re.search(r"/\d+/?$", a["href"])}
-        if not pages:
-            pages = {album_url}
-        tasks = [fetch_fapello_page_media(p, session, username) for p in pages]
-        for res in await asyncio.gather(*tasks):
-            media["images"].extend(res["images"])
-            media["videos"].extend(res["videos"])
-    media["images"] = list(set(media["images"]))
-    media["videos"] = list(set(media["videos"]))
-    return media
-
-async def extract_jpg5_album_media_urls(album_url: str) -> List[str]:
-    urls = set()
-    next_page = album_url.rstrip("/")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
-        while next_page:
-            async with session.get(next_page) as resp:
-                if resp.status != 200:
-                    break
-                html = await resp.text()
-            soup = BeautifulSoup(html, "html.parser")
-            found = {img["src"] for img in soup.find_all("img", src=True) if "jpg5.su" in img["src"]}
-            if not found or found.issubset(urls):
-                break
-            urls.update(found)
-            nxt = soup.find("a", {"data-pagination": "next"})
-            next_page = nxt["href"] if nxt and "href" in nxt.attrs else None
-            if next_page and not next_page.startswith("http"):
-                next_page = "https://jpg5.su" + next_page
-    return list(urls)
-
-# ---- New functions ----
-
-async def fetch_notfans(search_term: str, debug: bool = False) -> Tuple[List[str], List[str]]:
-    base = "https://notfans.com"
-    encoded = urllib.parse.quote_plus(search_term)
-    first_url = f"{base}/search/{encoded}/"
-    term = search_term.lower()
-    urls, titles = [], []
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
-        if debug: print(f"[NOTFANS] GET {first_url}")
-        async with session.get(first_url) as resp:
-            if resp.status != 200:
-                return [], []
-            html = await resp.text()
-        soup = BeautifulSoup(html, "html.parser")
-        items = soup.select('a[href^="https://notfans.com/videos/"]')
-        if debug: print(f"[NOTFANS] Found {len(items)} on page1")
-        for a in items:
-            t = a.find("strong", class_="title")
-            if not t: continue
-            title = t.get_text(strip=True)
-            if term not in title.lower(): continue
-            href = a["href"].strip()
-            urls.append(href if href.startswith("http") else base + href)
-            titles.append(title)
-        # pagination via AJAX parameters
-        params = [lnk["data-parameters"] for lnk in soup.select('a[data-action="ajax"][data-parameters]')]
-        page_urls = []
-        for p in params:
-            qs = p.replace(":", "=").replace(";", "&")
-            page_urls.append(f"{first_url}?{qs}")
-        async def _fetch_page(u: str):
-            if debug: print(f"[NOTFANS] GET {u}")
-            try:
-                async with session.get(u) as r:
-                    if r.status != 200:
-                        return [], []
-                    h = await r.text()
-            except Exception as e:
-                if debug: print(f"[NOTFANS] ERR {e}")
-                return [], []
-            sp = BeautifulSoup(h, "html.parser")
-            us, ts = [], []
-            for a in sp.select('a[href^="https://notfans.com/videos/"]'):
-                t = a.find("strong", class_="title")
-                if not t: continue
-                title = t.get_text(strip=True)
-                if term not in title.lower(): continue
-                href = a["href"].strip()
-                us.append(href if href.startswith("http") else base + href)
-                ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
-    if debug: print(f"[NOTFANS] Total {len(urls)}")
-    return urls, titles
-
-async def fetch_influencers(term: str) -> Tuple[List[str], List[str]]:
-    urls, titles, page = [], [], 1
-    async with aiohttp.ClientSession() as session:
-        while True:
-            url = f"https://influencersgonewild.com/?s={term}&paged={page}"
-            print(f"[influencers] {url}")
-            async with session.get(url) as r:
-                text = await r.text()
-            soup = BeautifulSoup(text, "html.parser")
-            items = soup.find_all("a", class_="g1-frame")
-            if not items:
-                break
-            for a in items:
-                href = a.get("href")
-                title = a.get("title") or a.text.strip()
-                urls.append(href); titles.append(title)
-            page += 1
-    return urls, titles
-
-async def fetch_thothub(term: str) -> Tuple[List[str], List[str]]:
-    urls, titles, seen, page = [], [], set(), 1
-    async with aiohttp.ClientSession() as session:
-        while True:
-            url = f"https://thothub.to/search/{term}/?page={page}"
-            print(f"[thothub] {url}")
-            async with session.get(url) as r:
-                text = await r.text()
-            soup = BeautifulSoup(text, "html.parser")
-            items = [a for a in soup.select('a[title]') if not a.find("span", class_="line-private")]
-            new = False
-            for a in items:
-                href, title = a["href"], a["title"]
-                if href in seen: continue
-                seen.add(href); urls.append(href); titles.append(title)
-                new = True
-            if not new:
-                break
-            page += 1
-    return urls, titles
-
-async def fetch_dirtyship(term: str) -> Tuple[List[str], List[str]]:
-    urls, titles, page = [], [], 1
-    async with aiohttp.ClientSession() as session:
-        while True:
-            url = f"https://dirtyship.com/page/{page}/?search_param=all&s={term}"
-            print(f"[dirtyship] {url}")
-            async with session.get(url) as r:
-                text = await r.text()
-            soup = BeautifulSoup(text, "html.parser")
-            items = soup.find_all("a", id="preview_image")
-            if not items:
-                break
-            for a in items:
-                href = a["href"]
-                title = a.get("title") or a.text.strip()
-                urls.append(href); titles.append(title)
-            page += 1
-    return urls, titles
-
-async def fetch_pimpbunny(term: str) -> Tuple[List[str], List[str]]:
-    urls, titles = [], []
-    url = f"https://pimpbunny.com/search/{term}/"
-    async with aiohttp.ClientSession() as session:
-        print(f"[pimpbunny] {url}")
-        async with session.get(url) as r:
-            text = await r.text()
-        soup = BeautifulSoup(text, "html.parser")
-        for a in soup.find_all("a", class_="pb-item-link"):
-            href = a["href"]
-            title = a.get("title") or a.text.strip()
-            urls.append(href); titles.append(title)
-    return urls, titles
-
-async def fetch_leakedzone(term: str) -> Tuple[List[str], List[str]]:
-    urls, titles = [], []
-    url = f"https://leakedzone.com/search?search={term}"
-    async with aiohttp.ClientSession() as session:
-        print(f"[leakedzone] {url}")
-        async with session.get(url) as r:
-            text = await r.text()
-        soup = BeautifulSoup(text, "html.parser")
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if href.startswith("https://leakedzone.com/") and term.lower().replace(" ", "") in href.lower():
-                title = a.get("title") or a.text.strip()
-                urls.append(href); titles.append(title)
-    return urls, titles
-
-async def fetch_fanslyleaked(term: str) -> Tuple[List[str], List[str]]:
-    urls, titles, seen, page = [], [], set(), 1
-    async with aiohttp.ClientSession() as session:
-        while True:
-            url = f"https://ww1.fanslyleaked.com/page/{page}/?s={term}"
-            print(f"[fanslyleaked] {url}")
-            async with session.get(url) as r:
-                text = await r.text()
-            soup = BeautifulSoup(text, "html.parser")
-            items = soup.find_all("a", href=True, title=True)
-            new = False
-            for a in items:
-                href, title = a["href"], a["title"]
-                if href.startswith("/"):
-                    href = "https://ww1.fanslyleaked.com" + href
-                if not href.startswith("https://ww1.fanslyleaked.com/"):
-                    continue
-                if any(x in href for x in ["/page/", "?s=", "#"]):
-                    continue
-                if href in seen:
-                    continue
-                seen.add(href); urls.append(href); titles.append(title)
-                new = True
-            if not new:
-                break
-            page += 1
-    return urls, titles
-
-def _normalize(s: str) -> str:
-    return "".join(s.lower().split())
-
-async def fetch_gotanynudes(search_term: str) -> Tuple[List[str], List[str]]:
-    query = search_term.replace(" ", "+")
-    page = 1
-    urls, titles = [], []
-    normalized = _normalize(search_term)
-    async with aiohttp.ClientSession() as session:
-        while True:
-            url = (
-                f"https://gotanynudes.com/?s={query}"
-                if page == 1
-                else f"https://gotanynudes.com/page/{page}/?s={query}"
-            )
-            print(f"[gotanynudes] {url}")
-            async with session.get(url) as r:
-                html = await r.text()
-            soup = BeautifulSoup(html, "html.parser")
-            found = 0
-            for a in soup.find_all("a", class_="g1-frame", title=True, href=True):
-                title = a["title"].strip()
-                if normalized in _normalize(title):
-                    href = a["href"]
-                    urls.append(href); titles.append(title)
-                    found += 1
-            nxt = soup.find("a", class_="g1-load-more", attrs={"data-g1-next-page-url": True})
-            if not nxt or found == 0:
-                break
-            page += 1
-    return urls, titles
-
-async def fetch_nsfw247(search_term: str) -> Tuple[List[str], List[str]]:
-    query = search_term.replace(" ", "-")
-    normalized = _normalize(search_term)
-    base = f"https://nsfw247.to/search/{query}-0z5g7jn9"
-    urls, titles, page = [], [], 1
-    async with aiohttp.ClientSession() as session:
-        while True:
-            url = base if page == 1 else f"{base}/page/{page}/"
-            print(f"[nsfw247] {url}")
-            async with session.get(url) as r:
-                html = await r.text()
-            soup = BeautifulSoup(html, "html.parser")
-            found = 0
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                if not href.startswith("https://nsfw247.to/"):
-                    continue
-                title = a.get_text(strip=True)
-                if normalized in _normalize(title):
-                    urls.append(href); titles.append(title); found += 1
-            if found == 0:
-                break
-            page += 1
-    return urls, titles
-
-async def fetch_hornysimp(search_term: str) -> Tuple[List[str], List[str]]:
-    query = search_term.replace(" ", "+")
-    normalized = _normalize(search_term)
-    urls, titles, page = [], [], 1
-    async with aiohttp.ClientSession() as session:
-        while True:
-            url = (
-                f"https://hornysimp.com/?s={query}"
-                if page == 1
-                else f"https://hornysimp.com/?s={query}/?_page={page}"
-            )
-            print(f"[hornysimp] {url}")
-            async with session.get(url) as r:
-                html = await r.text()
-            soup = BeautifulSoup(html, "html.parser")
-            found = 0
-            for a in soup.find_all("a", href=True, title=True):
-                href = a["href"]; title = a["title"].strip()
-                if "hornysimp.com" in href and normalized in _normalize(title):
-                    urls.append(href); titles.append(title); found += 1
-            if found == 0:
-                break
-            page += 1
-    return urls, titles
-
-async def fetch_porntn(search_term: str) -> Tuple[List[str], List[str]]:
-    query = search_term.replace(" ", "-")
-    base = f"https://porntn.com/search/{query}"
-    normalized = _normalize(search_term)
-    urls, titles = [], []
-    async with aiohttp.ClientSession() as session:
-        # first page
-        print(f"[porntn] GET {base}")
-        async with session.get(base) as r:
-            html = await r.text()
-        soup = BeautifulSoup(html, "html.parser")
-        for a in soup.find_all("a", href=True, title=True):
-            href, title = a["href"], a["title"].strip()
-            if href.startswith("https://porntn.com/videos") and normalized in _normalize(title):
-                urls.append(href); titles.append(title)
-        # offsets
-        offsets = []
-        for a in soup.find_all("a", href="#videos", attrs={"data-parameters": True}):
-            for part in a["data-parameters"].split(";"):
-                if part.startswith("from:"):
-                    _, off = part.split(":", 1)
-                    if off.isdigit():
-                        offsets.append(off)
-        for off in offsets:
-            page_url = f"{base}/?from={off}"
-            print(f"[porntn] GET {page_url}")
-            async with session.get(page_url) as r:
-                html2 = await r.text()
-            soup2 = BeautifulSoup(html2, "html.parser")
-            found = 0
-            for a in soup2.find_all("a", href=True, title=True):
-                href, title = a["href"], a["title"].strip()
-                if href.startswith("https://porntn.com/videos") and normalized in _normalize(title):
-                    urls.append(href); titles.append(title); found += 1
-            if found == 0:
-                break
-    return urls, titles
-
-async def fetch_xxbrits(search_term: str) -> Tuple[List[str], List[str]]:
-    query = search_term.replace(" ", "")
-    base = f"https://www.xxbrits.com/search/{query}-23cd7b/"
-    normalized = _normalize(search_term)
-    urls, titles = [], []
-    async with aiohttp.ClientSession() as session:
-        print(f"[xxbrits] GET {base}")
-        async with session.get(base) as r:
-            html = await r.text()
-        soup = BeautifulSoup(html, "html.parser")
-        for a in soup.find_all("a", class_="item link-post", href=True, title=True):
-            title, href = a["title"].strip(), a["href"]
-            if normalized in _normalize(title):
-                urls.append(href); titles.append(title)
-        offsets = []
-        for a in soup.find_all("a", href="#search", attrs={"data-parameters": True}):
-            for part in a["data-parameters"].split(";"):
-                if ":" in part:
-                    k, v = part.split(":", 1)
-                    if v.isdigit():
-                        offsets.append(v)
-        for off in offsets:
-            page_url = f"{base}?from={off}"
-            print(f"[xxbrits] GET {page_url}")
-            async with session.get(page_url) as r:
-                html2 = await r.text()
-            soup2 = BeautifulSoup(html2, "html.parser")
-            found = 0
-            for a in soup2.find_all("a", class_="item link-post", href=True, title=True):
-                title, href = a["title"].strip(), a["href"]
-                if normalized in _normalize(title):
-                    urls.append(href); titles.append(title); found += 1
-            if found == 0:
-                break
-    return urls, titles
-
-async def fetch_bitchesgirls(search_term: str) -> Tuple[List[str], List[str]]:
-    query = search_term.replace(" ", "%20")
-    normalized = _normalize(search_term)
-    urls, titles, page = [], [], 1
-    async with aiohttp.ClientSession() as session:
-        while True:
-            url = f"https://bitchesgirls.com/search/{query}/{page}/"
-            print(f"[bitchesgirls] {url}")
-            async with session.get(url) as r:
-                html = await r.text()
-            soup = BeautifulSoup(html, "html.parser")
-            found = 0
-            for a in soup.find_all("a", href=True):
-                href = a["href"]; text = a.get_text(strip=True)
-                if href.startswith("/onlyfans/") and normalized in _normalize(text):
-                    full = f"https://bitchesgirls.com{href}"
-                    urls.append(full); titles.append(text); found += 1
-            if found == 0:
-                break
-            page += 1
-    return urls, titles
-
-async def fetch_thotslife(term: str) -> Tuple[List[str], List[str]]:
-    urls, titles, seen = [], [], set()
-    next_url = f"https://thotslife.com/?s={term}"
-    async with aiohttp.ClientSession() as session:
-        while next_url:
-            print(f"[thotslife] {next_url}")
-            async with session.get(next_url) as r:
-                text = await r.text()
-            soup = BeautifulSoup(text, "html.parser")
-            items = soup.find_all("a", class_="g1-frame")
-            found = False
-            for a in items:
-                href = a.get("href"); title = a.get("title") or a.text.strip()
-                if href in seen:
-                    continue
-                seen.add(href); urls.append(href); titles.append(title); found = True
-            load_more = soup.find("a", class_="g1-button g1-load-more", attrs={"data-g1-next-page-url": True})
-            if not load_more or not found:
-                break
-            next_url = load_more["data-g1-next-page-url"]
-    return urls, titles
-
-# ---- API endpoints for existing scrapers ----
-
-@app.get("/api/erome-albums")
-async def get_erome_albums(username: str):
-    try:
-        return {"albums": await fetch_all_album_pages(username)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/erome-gallery")
-async def get_erome_gallery(query: str):
-    try:
-        async with aiohttp.ClientSession(headers=HEADERS) as session:
-            if query.startswith("http"):
-                imgs = await fetch_image_urls(query, session)
-            else:
-                albums = await fetch_all_album_pages(query)
-                imgs = await fetch_all_erome_image_urls(albums)
-        return {"images": imgs}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/bunkr-albums")
-async def get_bunkr_albums(username: str):
-    try:
-        return {"albums": await get_all_album_links_from_search(username)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/bunkr-gallery")
-async def get_bunkr_gallery(query: str):
-    try:
-        async with aiohttp.ClientSession() as session:
-            if query.startswith("http"):
-                pages = await get_image_links_from_album(query, session)
-                tasks = [get_image_url_from_link(u, session) for u in pages]
-                res = await asyncio.gather(*tasks)
-                imgs = [u for u in res if u and not thumb_pattern.search(u)]
-            else:
-                imgs = await fetch_bunkr_gallery_images(query)
-        return {"images": imgs}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/fapello-gallery")
-async def get_fapello_gallery(album_url: str):
-    if "fapello.com" not in album_url:
-        raise HTTPException(status_code=400, detail="Invalid album URL")
-    try:
-        m = await fetch_fapello_album_media(album_url)
-        return {"images": m["images"], "videos": m["videos"]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/jpg5-gallery")
-async def get_jpg5_gallery(album_url: str):
-    try:
-        return {"images": await extract_jpg5_album_media_urls(album_url)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ---- API endpoints for new scrapers ----
-
-@app.get("/api/notfans")
-async def get_notfans(search_term: str, debug: bool = False):
-    urls, titles = await fetch_notfans(search_term, debug)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/influencers")
-async def get_influencers(term: str):
-    urls, titles = await fetch_influencers(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/thothub")
-async def get_thothub(term: str):
-    urls, titles = await fetch_thothub(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/dirtyship")
-async def get_dirtyship(term: str):
-    urls, titles = await fetch_dirtyship(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/pimpbunny")
-async def get_pimpbunny(term: str):
-    urls, titles = await fetch_pimpbunny(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/leakedzone")
-async def get_leakedzone(term: str):
-    urls, titles = await fetch_leakedzone(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/fanslyleaked")
-async def get_fanslyleaked(term: str):
-    urls, titles = await fetch_fanslyleaked(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/gotanynudes")
-async def get_gotanynudes(term: str):
-    urls, titles = await fetch_gotanynudes(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/nsfw247")
-async def get_nsfw247(term: str):
-    urls, titles = await fetch_nsfw247(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/hornysimp")
-async def get_hornysimp(term: str):
-    urls, titles = await fetch_hornysimp(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/porntn")
-async def get_porntn(term: str):
-    urls, titles = await fetch_porntn(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/xxbrits")
-async def get_xxbrits(term: str):
-    urls, titles = await fetch_xxbrits(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/bitchesgirls")
-async def get_bitchesgirls(term: str):
-    urls, titles = await fetch_bitchesgirls(term)
-    return {"urls": urls, "titles": titles}
-
-@app.get("/api/thotslife")
-async def get_thotslife(term: str):
-    urls, titles = await fetch_thotslife(term)
-    return {"urls": urls, "titles": titles}
-
-# ---- Stats & WebSocket ----
-@app.get("/api/stats")
-async def get_stats():
-    return {"totalVisits": total_visits, "onlineUsers": len(active_connections)}
-
-async def broadcast_stats():
-    data = json.dumps({"totalVisits": total_visits, "onlineUsers": len(active_connections)})
-    for ws in list(active_connections):
-        try:
-            await ws.send_text(data)
-        except:
-            active_connections.discard(ws)
-
-@app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-    await ws.accept()
-    active_connections.add(ws)
-    await broadcast_stats()
-    try:
-        while True:
-            await ws.receive_text()
-            await broadcast_stats()
-    except WebSocketDisconnect:
-        active_connections.discard(ws)
-        await broadcast_stats()
-
-# ---- Run ----
-def start():
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
-
-if __name__ == "__main__":
-    start()
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>N3XUS LEAKS</title>
+  <!-- Google Font -->
+  <link href="https://fonts.googleapis.com/css?family=Montserrat:400,600,700&display=swap" rel="stylesheet"/>
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+  <style>
+    :root {
+      --bg-dark: #0d0d0f;
+      --bg-darker: #131318;
+      --text-light: #e1e1e6;
+      --text-muted: #7a7a8c;
+      --accent: #e6007e;
+      --accent-hover: #ff1a95;
+      --sidebar-width: 240px;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; font-family:'Montserrat',sans-serif; }
+    body { display:flex; min-height:100vh; background:var(--bg-dark); color:var(--text-light); }
+    a { text-decoration:none; color:inherit; }
+
+    /* Sidebar */
+    .sidebar {
+      position:fixed; top:0; left:0;
+      width:var(--sidebar-width); height:100%;
+      background:var(--bg-darker);
+      display:flex; flex-direction:column; padding-top:20px;
+    }
+    .sidebar ul { list-style:none; padding:0 20px; }
+    .sidebar li + li { margin-top:12px; }
+    .sidebar li a {
+      display:flex; align-items:center;
+      padding:12px 16px; border-radius:4px;
+      transition: background .2s;
+    }
+    .sidebar li a:hover, .sidebar li a.active {
+      background: rgba(230,0,126,0.1);
+    }
+    .sidebar i { margin-right:12px; font-size:18px; }
+
+    /* Main panel */
+    .main {
+      margin-left:var(--sidebar-width);
+      flex:1; display:flex; flex-direction:column;
+    }
+
+    /* Header */
+    .header {
+      height:60px; background:var(--bg-darker);
+      display:flex; align-items:center;
+      justify-content:space-between; padding:0 20px;
+    }
+    #logo { height:40px; }
+    #search-form { display:flex; align-items:center; }
+    #search-input {
+      padding:6px 10px; font-size:14px;
+      border:none; border-radius:4px 0 0 4px; width:200px;
+    }
+    #search-btn {
+      padding:6px 12px; border:none; border-radius:0 4px 4px 0;
+      background:var(--accent); color:#fff; cursor:pointer;
+      transition: background .2s;
+    }
+    #search-btn:hover { background:var(--accent-hover); }
+
+    /* Intro */
+    #intro {
+      padding:60px 40px; text-align:center;
+      animation: fadeIn 1.5s ease-in;
+    }
+    #intro h2 {
+      font-size:36px; color:var(--accent);
+      margin-bottom:16px;
+      animation: slideDown 1s ease-out;
+    }
+    #intro p {
+      color:var(--text-muted); line-height:1.5; max-width:600px; margin:0 auto;
+    }
+    @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+    @keyframes slideDown { from { transform:translateY(-20px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+
+    .content { flex:1; overflow-y:auto; }
+
+    /* Models Section */
+    .models-section { padding:20px 40px; display:none; }
+    #model-list-tools {
+      display:flex; align-items:center; flex-wrap:wrap;
+      gap:8px; margin-bottom:16px;
+    }
+    #model-filter-input {
+      padding:6px 10px; font-size:14px; border:none;
+      border-radius:4px; width:200px;
+    }
+    #model-az-list button {
+      background:none; border:none; color:var(--accent);
+      cursor:pointer; font-size:14px; padding:4px 6px;
+      border-radius:4px; transition:background .2s;
+    }
+    #model-az-list button:hover { background:rgba(230,0,126,0.1); }
+
+    .model-cards {
+      display:grid; gap:16px;
+      grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+    }
+    .model-card {
+      background:var(--bg-darker); border-radius:4px; overflow:hidden;
+      cursor:pointer; transition:transform .1s;
+    }
+    .model-card:hover { transform:scale(1.02); }
+    .model-card img {
+      width:100%; height:120px; object-fit:cover;
+    }
+    .model-card .info {
+      padding:8px; text-align:center;
+    }
+    .model-card .info h3 {
+      font-size:14px; margin-bottom:4px; color:var(--text-light);
+    }
+    .model-card .info p {
+      font-size:12px; color:var(--text-muted);
+    }
+
+    /* Gallery subview */
+    #gallery-view { display:none; padding:20px 40px; }
+    #back-btn {
+      background:none; border:none; color:var(--accent);
+      cursor:pointer; margin-bottom:16px; font-size:14px;
+    }
+    .endpoint-section { margin-bottom:24px; }
+    .endpoint-section h3 { font-size:18px; margin-bottom:8px; color:var(--accent); }
+    .items-grid {
+      display:grid; gap:16px;
+      grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
+    }
+    .items-grid img {
+      width:100%; height:auto; border-radius:4px; display:block;
+    }
+
+    /* FAQ Accordion */
+    .accordion { max-width:800px; margin:40px auto; }
+    .accordion-item {
+      background:var(--bg-darker); border-radius:4px;
+      margin-bottom:16px; overflow:hidden;
+    }
+    .accordion-item button {
+      width:100%; background:none; border:none;
+      color:var(--text-light); text-align:left;
+      padding:20px; font-size:16px;
+      display:flex; justify-content:space-between;
+      align-items:center; cursor:pointer;
+      transition: background .2s;
+    }
+    .accordion-item button:hover { background:rgba(255,255,255,0.05); }
+    .accordion-item button i {
+      font-size:20px; transition:transform .3s;
+    }
+    .panel {
+      max-height:0; overflow:hidden;
+      transition:max-height .3s ease;
+      background:var(--bg-dark);
+    }
+    .panel p { padding:0 20px 20px; color:var(--text-muted); }
+
+    /* Terms */
+    #terms {
+      max-width:800px; margin:40px auto;
+      color:var(--text-muted); line-height:1.5; padding:0 20px;
+    }
+
+    /* Footer */
+    .footer {
+      background:var(--bg-darker);
+      padding:40px 20px; color:var(--text-muted);
+      display:flex; justify-content:space-between; flex-wrap:wrap;
+    }
+    .footer .left { max-width:600px; }
+    .footer .left h3 { color:#fff; margin-bottom:8px; }
+    .footer .links { list-style:none; display:flex; flex-wrap:wrap; margin-top:16px; }
+    .footer .links li { margin-right:16px; margin-bottom:8px; }
+    .footer .payments i { margin-right:12px; font-size:24px; }
+
+    /* Back to top */
+    .back-to-top {
+      position:fixed; bottom:20px; right:50%;
+      transform:translateX(50%);
+      background:var(--accent); width:48px; height:48px;
+      border-radius:50%; display:flex; align-items:center;
+      justify-content:center; color:#fff; cursor:pointer;
+      transition:background .2s;
+    }
+    .back-to-top:hover { background:var(--accent-hover); }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <ul>
+      <li><a href="#" class="active"><i class="fas fa-star"></i> N3XUS LEAKS</a></li>
+      <li><a href="#" id="menu-models"><i class="fas fa-user"></i> Models</a></li>
+      <li><a href="#faq"><i class="fas fa-question-circle"></i> FAQ</a></li>
+      <li><a href="#terms"><i class="fas fa-file-alt"></i> Terms</a></li>
+    </ul>
+  </aside>
+
+  <!-- Main panel -->
+  <div class="main">
+    <header class="header">
+      <div><h1 style="display:inline-block; color:var(--accent);">N3XUS LEAKS</h1></div>
+      <img id="logo" src="" alt=""/>
+      <form id="search-form">
+        <input id="search-input" placeholder="Search term…" autocomplete="off"/>
+        <button type="submit" id="search-btn"><i class="fas fa-search"></i></button>
+      </form>
+    </header>
+
+    <div class="content">
+      <section id="intro">
+        <h2>Welcome to N3XUS LEAKS</h2>
+        <p>
+          Search any creator name and instantly pull galleries across multiple leak-sites.
+          The results are stored locally so you can browse even if the internet goes down.
+          Simply enter a search term above and view thumbnails; click a card to open all links.
+        </p>
+      </section>
+
+      <!-- MODELS SECTION -->
+      <section class="models-section" id="models-section">
+        <div id="model-list-tools">
+          <input id="model-filter-input" type="text" placeholder="Filter models…"/>
+          <div id="model-az-list"></div>
+        </div>
+        <div class="model-cards" id="models-grid"></div>
+      </section>
+
+      <!-- GALLERY / ALBUM LINKS VIEW -->
+      <section id="gallery-view">
+        <button id="back-btn"><i class="fas fa-arrow-left"></i> Back to models</button>
+        <h2 id="model-title"></h2>
+        <div id="album-links"></div>
+      </section>
+
+      <!-- FAQ -->
+      <section id="faq" class="accordion">
+        <div class="accordion-item">
+          <button>What does this site do? <i class="fas fa-plus"></i></button>
+          <div class="panel"><p>Aggregates publicly-available galleries from multiple sources. Search any term to see results.</p></div>
+        </div>
+        <div class="accordion-item">
+          <button>How does offline work? <i class="fas fa-plus"></i></button>
+          <div class="panel"><p>Results are saved in your browser’s LocalStorage so you can revisit them without reloading.</p></div>
+        </div>
+        <div class="accordion-item">
+          <button>Is this legal? <i class="fas fa-plus"></i></button>
+          <div class="panel"><p>We simply link to public content. We do not host any copyrighted material.</p></div>
+        </div>
+      </section>
+
+      <!-- TERMS -->
+      <section id="terms">
+        <h2>Terms &amp; Conditions</h2>
+        <p>By using this site you agree not to redistribute copyrighted content. N3XUS LEAKS is not responsible for external site availability.</p>
+      </section>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="left">
+        <h3>N3XUS LEAKS</h3>
+        <p>Your one-stop aggregator for leak galleries across the web. No subscriptions, no logins—just search and browse.</p>
+        <ul class="links">
+          <li><a href="#faq">FAQ</a></li>
+          <li><a href="#terms">Terms</a></li>
+          <li><a href="#">Privacy</a></li>
+          <li><a href="#">Contact</a></li>
+        </ul>
+        <div class="payments">
+          <i class="fab fa-bitcoin"></i>
+          <i class="fas fa-dollar-sign"></i>
+          <i class="fab fa-cc-paypal"></i>
+          <i class="fab fa-cc-visa"></i>
+          <i class="fab fa-cc-mastercard"></i>
+          <i class="fab fa-cc-amex"></i>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <div class="back-to-top"><i class="fas fa-arrow-up"></i></div>
+
+  <script>
+    const intro         = document.getElementById('intro');
+    const modelsSection = document.getElementById('models-section');
+    const galleryView   = document.getElementById('gallery-view');
+    const modelsGrid    = document.getElementById('models-grid');
+    const albumLinksEl  = document.getElementById('album-links');
+    const searchForm    = document.getElementById('search-form');
+    const searchInput   = document.getElementById('search-input');
+    const menuModels    = document.getElementById('menu-models');
+    const backBtn       = document.getElementById('back-btn');
+    const modelTitle    = document.getElementById('model-title');
+    const faqButtons    = document.querySelectorAll('.accordion-item button');
+    const backToTop     = document.querySelector('.back-to-top');
+
+    const endpoints = [
+      { name:'Erome Gallery', url: q=>`/api/erome-gallery?query=${q}`,       type:'gallery' },
+      { name:'Erome Albums',  url: q=>`/api/erome-albums?username=${q}`,     type:'albums'  },
+      { name:'Bunkr Gallery', url: q=>`/api/bunkr-gallery?query=${q}`,       type:'gallery' },
+      { name:'Bunkr Albums',  url: q=>`/api/bunkr-albums?username=${q}`,     type:'albums'  },
+      { name:'NotFans',       url: q=>`/api/notfans?search_term=${q}`,       type:'urls',   key:['urls','titles'] },
+      { name:'Influencers',   url: q=>`/api/influencers?term=${q}`,          type:'urls',   key:['urls','titles'] },
+      { name:'Thothub',       url: q=>`/api/thothub?term=${q}`,              type:'urls',   key:['urls','titles'] },
+      { name:'DirtyShip',     url: q=>`/api/dirtyship?term=${q}`,            type:'urls',   key:['urls','titles'] },
+      { name:'PimpBunny',     url: q=>`/api/pimpbunny?term=${q}`,            type:'urls',   key:['urls','titles'] },
+      { name:'LeakedZone',    url: q=>`/api/leakedzone?term=${q}`,           type:'urls',   key:['urls','titles'] },
+      { name:'FanslyLeaked',  url: q=>`/api/fanslyleaked?term=${q}`,         type:'urls',   key:['urls','titles'] },
+      { name:'GotAnyNudes',   url: q=>`/api/gotanynudes?term=${q}`,          type:'urls',   key:['urls','titles'] },
+      { name:'NSFW247',       url: q=>`/api/nsfw247?term=${q}`,             type:'urls',   key:['urls','titles'] },
+      { name:'HornySimp',     url: q=>`/api/hornysimp?term=${q}`,           type:'urls',   key:['urls','titles'] },
+      { name:'Porntn',        url: q=>`/api/porntn?term=${q}`,              type:'urls',   key:['urls','titles'] },
+      { name:'xxBrits',       url: q=>`/api/xxbrits?term=${q}`,             type:'urls',   key:['urls','titles'] },
+      { name:'BitchesGirls',  url: q=>`/api/bitchesgirls?term=${q}`,        type:'urls',   key:['urls','titles'] },
+      { name:'ThotsLife',     url: q=>`/api/thotslife?term=${q}`,           type:'urls',   key:['urls','titles'] },
+    ];
+
+    let results = JSON.parse(localStorage.getItem('n3xus_results')||'[]');
+
+    document.addEventListener('DOMContentLoaded', () => {
+      if (results.length) {
+        showModelsSection();
+        renderModels(results);
+      }
+      initModelTools();
+      updateModelsLayout();
+    });
+
+    menuModels.addEventListener('click', e=>{
+      e.preventDefault();
+      showModelsSection();
+    });
+
+    searchForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const term = searchInput.value.trim();
+      if (!term) return;
+      modelsGrid.innerHTML = `<p style="grid-column:1/-1;color:var(--text-muted)">Searching all endpoints…</p>`;
+      const model = { name: term, endpoints: [] };
+      await Promise.all(endpoints.map(ep => fetchEndpoint(ep, term, model)));
+      if (model.endpoints.length) {
+        results.push(model);
+        localStorage.setItem('n3xus_results', JSON.stringify(results));
+        renderModels(results);
+        showModelsSection();
+        modelsSection.scrollIntoView({ behavior:'smooth' });
+      }
+    });
+
+    async function fetchEndpoint(ep, term, model) {
+      const url = ep.url(encodeURIComponent(term));
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        let items = [];
+        if (ep.type==='gallery') {
+          items = data.images||[];
+        } else if (ep.type==='albums') {
+          items = data.albums||[];
+        } else {
+          const [u,t] = [data[ep.key[0]]||[], data[ep.key[1]]||[]];
+          items = u.map((url,i)=>({ url, title:t[i] }));
+        }
+        if (items.length) {
+          model.endpoints.push({ name:ep.name, type:ep.type, items });
+        }
+      } catch (err) {
+        console.error(`${ep.name}:`, err);
+      }
+    }
+
+    function showModelsSection() {
+      intro.style.display = 'none';
+      galleryView.style.display = 'none';
+      document.getElementById('faq').style.display = 'none';
+      document.getElementById('terms').style.display = 'none';
+      modelsSection.style.display = 'block';
+    }
+
+    function renderModels(list) {
+      modelsGrid.innerHTML = '';
+      list.forEach(model => {
+        const card = document.createElement('div');
+        card.className = 'model-card';
+        card.innerHTML = `
+          <div class="info">
+            <h3>${model.name}</h3>
+            <p>${model.endpoints.length} sources</p>
+          </div>
+        `;
+        card.addEventListener('click', ()=>openGallery(model));
+        modelsGrid.appendChild(card);
+      });
+    }
+
+    function openGallery(model) {
+      intro.style.display = 'none';
+      modelsSection.style.display = 'none';
+      document.getElementById('faq').style.display = 'none';
+      document.getElementById('terms').style.display = 'none';
+      galleryView.style.display = 'block';
+      modelTitle.textContent = model.name;
+      albumLinksEl.innerHTML = '';
+      model.endpoints.forEach(ep => {
+        const section = document.createElement('div');
+        section.className = 'endpoint-section';
+        const title = document.createElement('h3');
+        title.textContent = `${ep.name} (${ep.items.length})`;
+        section.appendChild(title);
+        const grid = document.createElement('div');
+        grid.className = 'items-grid';
+        ep.items.forEach(item => {
+          let url, thumb;
+          if (typeof item === 'string') {
+            url = item;
+            thumb = ep.type==='gallery' ? item : '/static/album-placeholder.png';
+          } else {
+            url = item.url||item.link||'';
+            thumb = item.thumbnail||item.url||'/static/album-placeholder.png';
+          }
+          if (ep.type==='gallery' || ep.type==='albums') {
+            const img = document.createElement('img');
+            img.src = thumb;
+            img.alt = ep.name;
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.appendChild(img);
+            grid.appendChild(a);
+          } else {
+            const a = document.createElement('a');
+            a.href = item.url;
+            a.target = '_blank';
+            a.textContent = item.title;
+            const div = document.createElement('div');
+            div.appendChild(a);
+            grid.appendChild(div);
+          }
+        });
+        section.appendChild(grid);
+        album-links          
+
+      });
+    }
+
+    backBtn.addEventListener('click', ()=>{
+      galleryView.style.display = 'none';
+      modelsSection.style.display = 'block';
+    });
+
+    faqButtons.forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const panel = btn.nextElementSibling, icon = btn.querySelector('i');
+        document.querySelectorAll('.panel').forEach(p=>p.style.maxHeight = null);
+        document.querySelectorAll('.accordion-item i').forEach(i=>i.classList.replace('fa-minus','fa-plus'));
+        if (!panel.style.maxHeight) {
+          panel.style.maxHeight = panel.scrollHeight+'px';
+          icon.classList.replace('fa-plus','fa-minus');
+        }
+      });
+    });
+
+    backToTop.addEventListener('click', ()=>window.scrollTo({top:0,behavior:'smooth'}));
+
+    function updateModelsLayout() {
+      if (window.matchMedia("(min-width: 821px) and (max-width: 1180px)").matches) {
+        modelsGrid.style.gridTemplateColumns = "repeat(3, 1fr)";
+      } else if (window.matchMedia("(max-width: 820px)").matches) {
+        modelsGrid.style.gridTemplateColumns = "repeat(1, 1fr)";
+      } else {
+        modelsGrid.style.gridTemplateColumns = "repeat(auto-fill,minmax(160px,1fr))";
+      }
+    }
+    document.addEventListener("DOMContentLoaded", updateModelsLayout);
+    window.matchMedia("(min-width: 821px) and (max-width: 1180px)").addEventListener("change", updateModelsLayout);
+    window.matchMedia("(max-width: 820px)").addEventListener("change", updateModelsLayout);
+
+    function initModelTools() {
+      const azList = document.getElementById('model-az-list');
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter=>{
+        const btn = document.createElement('button');
+        btn.textContent = letter;
+        btn.addEventListener('click',()=>filterModels(letter));
+        azList.appendChild(btn);
+      });
+      const filterInput = document.getElementById('model-filter-input');
+      filterInput.addEventListener('input',()=>filterModels(filterInput.value.trim()));
+    }
+
+    function filterModels(filter) {
+      const cards = Array.from(modelsGrid.children);
+      cards.forEach(card=>{
+        const name = card.querySelector('.info h3').textContent.toLowerCase();
+        if (filter.length===1 && /^[A-Z]$/.test(filter)) {
+          card.style.display = name.startsWith(filter.toLowerCase()) ? 'block' : 'none';
+        } else if (filter.length>1) {
+          card.style.display = name.includes(filter.toLowerCase()) ? 'block' : 'none';
+        } else {
+          card.style.display = 'block';
+        }
+      });
+    }
+  </script>
+</body>
+</html>
