@@ -16,7 +16,7 @@
     :root {
       --bg-dark: #0d0d0f;
       --bg-darker: #131318;
-      --text-light: #e1e16;
+      --text-light: #e1e1e6;
       --text-muted: #7a7a8c;
       --accent: #e6007e;
       --accent-hover: #ff1a95;
@@ -114,22 +114,24 @@
     /* Context menu */
     #img-context-menu {
       position: fixed;
-      background: #112240;
-      border: 1px solid #233554;
-      border-radius: 6px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.7);
-      color: #ccd6f6;
       display: none;
+      background: var(--bg-darker);
+      border: 2px solid var(--accent);
+      border-radius: 6px;
+      box-shadow: 0 0 8px var(--accent-hover);
       z-index: 10000;
     }
     #img-context-menu div {
       padding: 8px 12px;
       cursor: pointer;
       white-space: nowrap;
+      color: var(--accent);
+      transition: background .2s;
     }
     #img-context-menu div:hover {
-      background: #233554;
+      background: rgba(230,0,126,0.1);
     }
+
     .content { flex:1; overflow-y:auto; padding-top:20px; }
 
     /* Status Message */
@@ -390,11 +392,14 @@
       </div>
     </footer>
   </div>
+
+  <!-- Context menu -->
   <div id="img-context-menu">
     <div data-action="copy-image">Copy Image</div>
     <div data-action="copy-url">Copy Image URL</div>
     <div data-action="open">Open Image in New Tab</div>
   </div>
+
   <div class="back-to-top"><i class="fas fa-arrow-up"></i></div>
 
   <!-- Admin Panel (hidden until Ctrl+I) -->
@@ -454,7 +459,8 @@
           adminPanel     = document.getElementById('admin-panel'),
           tabIconLink    = document.getElementById('tab-icon'),
           tabIconInput   = document.getElementById('tab-icon-url'),
-          tabIconBtn     = document.getElementById('tab-icon-btn');
+          tabIconBtn     = document.getElementById('tab-icon-btn'),
+          contextMenu    = document.getElementById('img-context-menu');
 
     // All endpoints…
     const endpoints = [
@@ -485,6 +491,7 @@
       initFAQ();
       initModelsTools();
       initBackToTop();
+      initContextMenu();
       loadTabIcon();
       showSection('home');
 
@@ -831,8 +838,7 @@
         }
       }
     });
-
-    // ZIP-upload handler (stores images as base64, not blob URLs)
+    // ZIP-upload handler (stores images as base64)
     async function uploadNewModel() {
       const name = document.getElementById('new-model-name').value.trim();
       const zipFile = document.getElementById('new-model-zip').files[0];
