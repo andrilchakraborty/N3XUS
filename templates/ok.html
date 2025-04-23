@@ -23,6 +23,38 @@
       --sidebar-width: 240px;
     }
     * { margin:0; padding:0; box-sizing:border-box; font-family:'Montserrat',sans-serif; }
+    body { overflow: hidden; }
+    /* Preloader overlay */
+    #preloader {
+      position: fixed; top:0; left:0; width:100%; height:100%;
+      background: var(--bg-dark);
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      z-index:99999;
+      transition: opacity .5s ease;
+    }
+    #preloader img {
+      width:350px; height:auto;
+      box-shadow: 0 0 12px var(--accent-hover);
+    }
+    #loading-bar {
+      width:0; height:6px; background:var(--accent);
+      box-shadow: 0 0 8px var(--accent-hover);
+      margin-top:20px;
+      transition: width 1.5s ease;
+    }
+    #preloader.fade-out {
+      opacity:0;
+      pointer-events:none;
+    }
+
+    /* After preloading, allow scroll */
+    #preloader.fade-out ~ body, #preloader.fade-out ~ .main {
+      overflow: auto;
+    }
+
+    /* Hide overflow until preloader done */
+    html, .main { overflow: hidden; }
+
     body { display:flex; min-height:100vh; background:var(--bg-dark); color:var(--text-light); }
     a { text-decoration:none; color:inherit; }
 
@@ -64,6 +96,7 @@
     .main {
       margin-left:var(--sidebar-width);
       flex:1; display:flex; flex-direction:column;
+      overflow: auto;
     }
 
     /* Header */
@@ -114,18 +147,19 @@
     /* Context menu */
     #img-context-menu {
       position: fixed;
-      display: none;
-      background: var(--bg-darker);
+      background: rgba(20,0,20,0.95);
       border: 2px solid var(--accent);
       border-radius: 6px;
       box-shadow: 0 0 8px var(--accent-hover);
+      color: var(--text-light);
+      display: none;
       z-index: 10000;
+      padding: 4px 0;
     }
     #img-context-menu div {
-      padding: 8px 12px;
+      padding: 8px 16px;
       cursor: pointer;
       white-space: nowrap;
-      color: var(--accent);
       transition: background .2s;
     }
     #img-context-menu div:hover {
@@ -190,7 +224,7 @@
     }
 
     /* Gallery subview */
-    #gallery-view { display:none; padding:20px 40px; }
+    #gallery-view { display:none; padding:20px 40px; overflow:auto; }
     #back-btn {
       background:none; border:none; color:var(--accent);
       cursor:pointer; margin-bottom:16px; font-size:14px;
@@ -212,6 +246,10 @@
     }
     .edit-btn { right:32px; }
     .delete-btn { right:4px; }
+
+    /* JPG5 Section (same as models) */
+    #jpg5-section { display:none; padding:20px 40px; }
+    #jpg5-section h2 { color:var(--accent); margin-bottom:16px; }
 
     /* FAQ Accordion */
     .accordion { max-width:800px; margin:40px auto; }
@@ -283,6 +321,11 @@
   </style>
 </head>
 <body>
+  <!-- Preloader -->
+  <div id="preloader">
+    <img src="https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png?ex=6809c48c&is=6808730c&hm=247618a2250c26ecc847f71e96ca4467dae31fded42aa8245b0ab914e4d10ea6&=&format=webp&quality=lossless&width=882&height=882" alt="Loading"/>
+    <div id="loading-bar"></div>
+  </div>
 
   <!-- Sidebar -->
   <aside class="sidebar">
@@ -290,6 +333,7 @@
       <li><a href="#" id="menu-home" class="active"><i class="fas fa-star"></i> Home</a></li>
       <li><a href="#" id="menu-search"><i class="fas fa-search"></i> Search</a></li>
       <li><a href="#" id="menu-models"><i class="fas fa-user"></i> Models</a></li>
+      <li><a href="#" id="menu-jpg5"><i class="fas fa-images"></i> JPG5 Albums</a></li>
       <li><a href="#" id="menu-faq"><i class="fas fa-question-circle"></i> FAQ</a></li>
       <li><a href="#" id="menu-terms"><i class="fas fa-file-alt"></i> Terms</a></li>
     </ul>
@@ -340,6 +384,12 @@
         <div class="model-cards" id="models-grid"></div>
       </section>
 
+      <!-- JPG5 Album Section -->
+      <section id="jpg5-section">
+        <h2>JPG5 Albums</h2>
+        <div class="model-cards" id="jpg5-grid"></div>
+      </section>
+
       <!-- Gallery / Album Links View -->
       <section id="gallery-view">
         <button id="back-btn"><i class="fas fa-arrow-left"></i> Back</button>
@@ -351,7 +401,7 @@
       <section id="faq" class="accordion">
         <div class="accordion-item">
           <button>What does this site do? <i class="fas fa-plus"></i></button>
-          <div class="panel"><p>Aggregates publicly-available galleries from multiple sources. Search any term to see results.</p></div>  
+          <div class="panel"><p>Aggregates publicly-available galleries from multiple sources. Search any term to see results.</p></div>
         </div>
         <div class="accordion-item">
           <button>How does offline work? <i class="fas fa-plus"></i></button>
@@ -400,6 +450,7 @@
     <div data-action="open">Open Image in New Tab</div>
   </div>
 
+  <!-- Back to top -->
   <div class="back-to-top"><i class="fas fa-arrow-up"></i></div>
 
   <!-- Admin Panel (hidden until Ctrl+I) -->
@@ -413,6 +464,51 @@
   </div>
 
   <script>
+    // Disable default contextmenu globally
+    document.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Block common devtools shortcuts
+    document.addEventListener('keydown', e => {
+      if (
+        e.keyCode === 123 ||                                     // F12
+        (e.ctrlKey && e.shiftKey && [73,74,67].includes(e.keyCode)) || // Ctrl+Shift+I/C/J
+        (e.ctrlKey && e.keyCode === 85)                           // Ctrl+U
+      ) {
+        e.preventDefault();
+        return false;
+      }
+    });
+
+    // Detect devtools open by size difference and reload
+    const threshold = 160;
+    setInterval(() => {
+      if (
+        window.outerWidth - window.innerWidth > threshold ||
+        window.outerHeight - window.innerHeight > threshold
+      ) {
+        location.reload();
+      }
+    }, 1000);
+
+    // Preloader animation
+    window.addEventListener('load', () => {
+      const bar = document.getElementById('loading-bar');
+      const pre = document.getElementById('preloader');
+      setTimeout(() => bar.style.width = '100%', 100);
+      setTimeout(() => pre.classList.add('fade-out'), 1600);
+      setTimeout(() => {
+        pre.remove();
+        document.documentElement.style.overflow = 'auto';
+        document.body.style.overflow = 'auto';
+        document.querySelector('.main').style.overflow = 'auto';
+      }, 2200);
+    });
+
+    // Constants & state
+    const DEFAULT_THUMB = 'https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png?ex=6809c48c&is=6808730c&hm=247618a2250c26ecc847f71e96ca4467dae31fded42aa8245b0ab914e4d10ea6&=&format=webp&quality=lossless&width=882&height=882';
+    let results = JSON.parse(localStorage.getItem('n3xus_results') || '[]');
+    let adminMode = false;
+
     // Utility to show / hide status message
     function showStatus(msg) {
       const status = document.getElementById('status-message');
@@ -423,20 +519,17 @@
       document.getElementById('status-message').style.display = 'none';
     }
 
-    // Constants & state
-    const DEFAULT_THUMB = 'https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png';
-    let results = JSON.parse(localStorage.getItem('n3xus_results') || '[]');
-    let adminMode = false;
-
     // Element refs
     const menuHome       = document.getElementById('menu-home'),
           menuSearch     = document.getElementById('menu-search'),
           menuModels     = document.getElementById('menu-models'),
+          menuJPG5       = document.getElementById('menu-jpg5'),
           menuFaq        = document.getElementById('menu-faq'),
           menuTerms      = document.getElementById('menu-terms'),
           intro          = document.getElementById('intro'),
           searchSec      = document.getElementById('search-section'),
           modelsSec      = document.getElementById('models-section'),
+          jpg5Sec        = document.getElementById('jpg5-section'),
           galleryView    = document.getElementById('gallery-view'),
           faqSec         = document.getElementById('faq'),
           termsSec       = document.getElementById('terms'),
@@ -444,6 +537,7 @@
           searchIn       = document.getElementById('search-input'),
           searchGrid     = document.getElementById('search-grid'),
           modelsGrid     = document.getElementById('models-grid'),
+          jpg5Grid       = document.getElementById('jpg5-grid'),
           backBtn        = document.getElementById('back-btn'),
           modelTitle     = document.getElementById('model-title'),
           albumLinks     = document.getElementById('album-links'),
@@ -459,8 +553,7 @@
           adminPanel     = document.getElementById('admin-panel'),
           tabIconLink    = document.getElementById('tab-icon'),
           tabIconInput   = document.getElementById('tab-icon-url'),
-          tabIconBtn     = document.getElementById('tab-icon-btn'),
-          contextMenu    = document.getElementById('img-context-menu');
+          tabIconBtn     = document.getElementById('tab-icon-btn');
 
     // All endpoints…
     const endpoints = [
@@ -491,7 +584,6 @@
       initFAQ();
       initModelsTools();
       initBackToTop();
-      initContextMenu();
       loadTabIcon();
       showSection('home');
 
@@ -503,7 +595,50 @@
 
       if (results.length) {
         renderModels(results);
+        renderJPG5(results);
       }
+
+      // Custom context menu for images
+      let contextTarget = null;
+      const contextMenu = document.getElementById('img-context-menu');
+      document.addEventListener('click', e => {
+        if (!contextMenu.contains(e.target)) contextMenu.style.display = 'none';
+      });
+      document.addEventListener('contextmenu', e => {
+        const img = e.target.closest('.item-wrapper img');
+        if (img) {
+          // show custom menu
+          contextTarget = img;
+          contextMenu.style.top = `${e.pageY}px`;
+          contextMenu.style.left = `${e.pageX}px`;
+          contextMenu.style.display = 'block';
+        } else {
+          contextMenu.style.display = 'none';
+        }
+      });
+      contextMenu.addEventListener('click', async e => {
+        const action = e.target.dataset.action;
+        if (!action) return;
+        const src = contextTarget.src;
+        if (action === 'copy-image') {
+          try {
+            const data = await fetch(src);
+            const blob = await data.blob();
+            await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+            alert('Image copied to clipboard.');
+          } catch {
+            alert('Failed to copy image.');
+          }
+        } else if (action === 'copy-url') {
+          navigator.clipboard.writeText(src).then(
+            ()=>alert('Image URL copied.'),
+            ()=>alert('Failed to copy URL.')
+          );
+        } else if (action === 'open') {
+          window.open(src, '_blank');
+        }
+        contextMenu.style.display = 'none';
+      });
     });
 
     function loadTabIcon() {
@@ -513,7 +648,6 @@
         tabIconInput.value = url;
       }
     }
-
     function setTabIcon() {
       const url = tabIconInput.value.trim();
       if (!url) return alert('Enter a valid URL for the tab icon.');
@@ -524,13 +658,12 @@
 
     // Navigation & search
     function initNav() {
-      [menuHome, menuSearch, menuModels, menuFaq, menuTerms].forEach(btn => {
+      [menuHome, menuSearch, menuModels, menuJPG5, menuFaq, menuTerms].forEach(btn => {
         btn.addEventListener('click', e => {
           e.preventDefault();
           showSection(btn.id.replace('menu-', ''));
         });
       });
-
       searchForm.addEventListener('submit', async e => {
         e.preventDefault();
         let q = searchIn.value.trim();
@@ -552,360 +685,252 @@
         clearStatus();
       });
     }
-
     async function doSearch(term) {
       let model = { name: term, endpoints: [] };
       for (let ep of endpoints) {
         if (ep.name === 'JPG5 Gallery') continue;
-        let url = ep.url(encodeURIComponent(term));
         try {
-          let res = await fetch(url);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          let data = await res.json();
-          let items = [];
-          if (ep.type === 'gallery') {
-            items = data.images || [];
-          } else if (ep.type === 'albums') {
-            items = data.albums || [];
-          } else if (ep.type === 'urls') {
-            const urls = data[ep.key[0]] || [];
-            const titles = data[ep.key[1]] || [];
-            items = urls.map((u, i) => ({ url: u, title: titles[i] || u }));
+          let res = await fetch(ep.url(encodeURIComponent(term)));
+          if (!res.ok) throw '';
+          let data = await res.json(), items = [];
+          if (ep.type==='gallery') items = data.images||[];
+          else if (ep.type==='albums') items = data.albums||[];
+          else {
+            const urls = data[ep.key[0]]||[], titles = data[ep.key[1]]||[];
+            items = urls.map((u,i)=>({url:u,title:titles[i]||u}));
           }
-          if (items.length) model.endpoints.push({ ...ep, items });
-        } catch (err) {
-          console.error('Error fetching', ep.name, err);
-        }
+          if (items.length) model.endpoints.push({...ep, items});
+        } catch{}
       }
       if (term.startsWith('http')) {
         try {
           let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          let data = await res.json();
-          if (data.images && data.images.length) {
-            model.endpoints.push({ name: 'JPG5 Gallery', type: 'gallery', items: data.images });
+          if (res.ok) {
+            let data = await res.json();
+            if (data.images?.length) model.endpoints.push({name:'JPG5 Gallery',type:'gallery',items:data.images});
           }
-        } catch (err) {
-          console.error('Error fetching JPG5', err);
-        }
+        } catch{}
       }
-      if (model.endpoints.length === 0) {
-        return false;
-      }
+      if (!model.endpoints.length) return false;
       results.push(model);
-      localStorage.setItem('n3xus_results', JSON.stringify(results));
+      localStorage.setItem('n3xus_results',JSON.stringify(results));
       return true;
     }
 
     function renderSearch(list) {
       searchGrid.innerHTML = '';
-      for (let m of list) {
-        let thumbEp = m.endpoints.find(e => e.thumbnail) || m.endpoints.find(e => e.name === 'Erome Gallery');
-        let thumb = thumbEp
-          ? (thumbEp.thumbnail || (thumbEp.items[0].url || thumbEp.items[0]))
-          : DEFAULT_THUMB;
-        let card = document.createElement('div');
-        card.className = 'model-card';
-        card.innerHTML = `
-          <img src="${thumb}" alt="${m.name} thumbnail"/>
-          <div class="info">
-            <h3>${m.name}</h3>
-            <p>${m.endpoints.length} sources</p>
-          </div>`;
-        card.addEventListener('click', () => openGallery(m));  
+      list.forEach(m=>{
+        let ep = m.endpoints.find(e=>e.thumbnail)||m.endpoints.find(e=>e.name==='Erome Gallery');
+        let thumb = ep?(ep.thumbnail|| (ep.items[0].url||ep.items[0])):DEFAULT_THUMB;
+        let card = document.createElement('div'); card.className='model-card';
+        card.innerHTML = `<img src="${thumb}" alt="${m.name}"/><div class="info"><h3>${m.name}</h3><p>${m.endpoints.length} sources</p></div>`;
+        card.addEventListener('click',()=>openGallery(m));
         searchGrid.appendChild(card);
-      }
+      });
     }
-
     function renderModels(list) {
       modelsGrid.innerHTML = '';
-      for (let m of list) {
-        let thumbEp = m.endpoints.find(e => e.thumbnail) || m.endpoints.find(e => e.name === 'Erome Gallery');
-        let thumb = thumbEp
-          ? (thumbEp.thumbnail || (thumbEp.items[0].url || thumbEp.items[0]))
-          : DEFAULT_THUMB;
-        let card = document.createElement('div');
-        card.className = 'model-card';
-        card.innerHTML = `
-          <img src="${thumb}" alt="${m.name} thumbnail"/>
-          <div class="info">
-            <h3>${m.name}</h3>
-            <p>${m.endpoints.length} sources</p>
-          </div>`;
-        card.addEventListener('click', () => openGallery(m));
+      list.forEach(m=>{
+        let ep = m.endpoints.find(e=>e.thumbnail)||m.endpoints.find(e=>e.name==='Erome Gallery');
+        let thumb = ep?(ep.thumbnail||(ep.items[0].url||ep.items[0])):DEFAULT_THUMB;
+        let card = document.createElement('div'); card.className='model-card';
+        card.innerHTML = `<img src="${thumb}" alt="${m.name}"/><div class="info"><h3>${m.name}</h3><p>${m.endpoints.length} sources</p></div>`;
+        card.addEventListener('click',()=>openGallery(m));
         modelsGrid.appendChild(card);
-      }
+      });
+    }
+    function renderJPG5(list) {
+      jpg5Grid.innerHTML = '';
+      list.filter(m=>m.endpoints.some(e=>e.name==='JPG5 Gallery')).forEach(m=>{
+        let ep=m.endpoints.find(e=>e.name==='JPG5 Gallery');
+        let thumb=ep.items[0]||DEFAULT_THUMB;
+        let card=document.createElement('div');card.className='model-card';
+        card.innerHTML= `<img src="${thumb}" alt="JPG5"/><div class="info"><h3>${m.name}</h3><p>${ep.items.length} images</p></div>`;
+        card.addEventListener('click',()=>openGallery(m));
+        jpg5Grid.appendChild(card);
+      });
     }
 
     function openGallery(model) {
       showSection('');
-      galleryView.style.display = 'block';
-      modelTitle.textContent = model.name;
-      albumLinks.innerHTML = '';
-
-      // Reorder: all except Erome Gallery first, then Erome Gallery last
-      const ordered = model.endpoints
-        .filter(ep => ep.name !== 'Erome Gallery')
-        .concat(model.endpoints.filter(ep => ep.name === 'Erome Gallery'));
-
-      if (adminMode) {
-        let deleteModelBtn = document.createElement('button');
-        deleteModelBtn.textContent = 'Delete Model';
-        deleteModelBtn.addEventListener('click', () => {
-          if (confirm(`Delete model "${model.name}"?`)) {
-            results = results.filter(m => m !== model);
-            localStorage.setItem('n3xus_results', JSON.stringify(results));
-            renderModels(results);
-            showSection('models');
+      galleryView.style.display='block';
+      modelTitle.textContent=model.name;
+      albumLinks.innerHTML='';
+      const ordered = model.endpoints.filter(e=>e.name!=='Erome Gallery').concat(model.endpoints.filter(e=>e.name==='Erome Gallery'));
+      if(adminMode){
+        let btn=document.createElement('button');btn.textContent='Delete Model';
+        btn.addEventListener('click',()=>{
+          if(confirm(`Delete "${model.name}"?`)){
+            results=results.filter(m=>m!==model);
+            localStorage.setItem('n3xus_results',JSON.stringify(results));
+            renderModels(results);renderJPG5(results);showSection('models');
           }
         });
-        albumLinks.appendChild(deleteModelBtn);
+        albumLinks.appendChild(btn);
       }
-
-      ordered.forEach((ep, epIndex) => {
-        let sec = document.createElement('div');
-        sec.className = 'endpoint-section';
-
-        let header = document.createElement('div');
-        header.innerHTML = `<h3>${ep.name} (${ep.items.length})</h3>`;
-        if (adminMode) {
-          let delBtn = document.createElement('button');
-          delBtn.textContent = 'Delete Album';
-          delBtn.addEventListener('click', () => {
-            if (confirm(`Delete album "${ep.name}" entirely?`)) {
-              model.endpoints.splice(model.endpoints.indexOf(ep), 1);
-              if (!model.endpoints.length) {
-                results = results.filter(m => m !== model);
-                localStorage.setItem('n3xus_results', JSON.stringify(results));
-                renderModels(results);
-                showSection('models');
-                return;
+      ordered.forEach(ep=>{
+        let sec=document.createElement('div');sec.className='endpoint-section';
+        let hdr=document.createElement('div');
+        hdr.innerHTML=`<h3>${ep.name} (${ep.items.length})</h3>`;
+        if(adminMode){
+          let d=document.createElement('button');d.textContent='Delete Album';
+          d.addEventListener('click',()=>{
+            if(confirm(`Delete album "${ep.name}"?`)){
+              model.endpoints.splice(model.endpoints.indexOf(ep),1);
+              if(!model.endpoints.length){
+                results=results.filter(m=>m!==model);
+                localStorage.setItem('n3xus_results',JSON.stringify(results));
+                renderModels(results);renderJPG5(results);showSection('models');return;
               }
-              localStorage.setItem('n3xus_results', JSON.stringify(results));
-              renderModels(results);
-              openGallery(model);
+              localStorage.setItem('n3xus_results',JSON.stringify(results));
+              renderModels(results);renderJPG5(results);openGallery(model);
             }
           });
-          let editBtn = document.createElement('button');
-          editBtn.textContent = 'Edit Thumb';
-          editBtn.addEventListener('click', () => {
-            let newUrl = prompt('New thumbnail URL:', ep.thumbnail || '');
-            if (newUrl) {
-              ep.thumbnail = newUrl;
-              localStorage.setItem('n3xus_results', JSON.stringify(results));
-              renderModels(results);
-              openGallery(model);
-            }
+          let ebtn=document.createElement('button');ebtn.textContent='Edit Thumb';
+          ebtn.addEventListener('click',()=>{
+            let u=prompt('New thumbnail URL:',ep.thumbnail||'');
+            if(u){ep.thumbnail=u;localStorage.setItem('n3xus_results',JSON.stringify(results));renderModels(results);renderJPG5(results);openGallery(model);}
           });
-          header.append(delBtn, editBtn);
+          hdr.append(d,ebtn);
         }
-        sec.appendChild(header);
-
-        let grid = document.createElement('div');
-        grid.className = 'items-grid';
-        ep.items.forEach((item, idx) => {
-          let url = item.url || item;
-          let thumb = ep.name === 'Erome Gallery' ? url : (ep.thumbnail || DEFAULT_THUMB);
-          let wrapper = document.createElement('div');
-          wrapper.className = 'item-wrapper';
-
-          let a = document.createElement('a');
-          a.href = url;
-          a.target = '_blank';
-          let img = document.createElement('img');
-          img.src = thumb;
-          img.alt = ep.name;
-          a.appendChild(img);
-          wrapper.appendChild(a);
-
-          if (adminMode) {
-            let delMediaBtn = document.createElement('button');
-            delMediaBtn.className = 'item-btn delete-btn';
-            delMediaBtn.innerHTML = '<i class="fas fa-trash"></i>';
-            delMediaBtn.addEventListener('click', () => {
-              if (confirm('Delete this media item?')) {
-                ep.items.splice(idx, 1);
-                if (!ep.items.length) {
-                  model.endpoints = model.endpoints.filter(e => e !== ep);
-                  if (!model.endpoints.length) {
-                    results = results.filter(m => m !== model);
-                    localStorage.setItem('n3xus_results', JSON.stringify(results));
-                    renderModels(results);
-                    showSection('models');
-                    return;
+        sec.appendChild(hdr);
+        let grid=document.createElement('div');grid.className='items-grid';
+        ep.items.forEach((item,idx)=>{
+          let url=item.url||item;
+          let thumb=(ep.name==='Erome Gallery'||ep.name==='JPG5 Gallery')?url:(ep.thumbnail||DEFAULT_THUMB);
+          let wrap=document.createElement('div');wrap.className='item-wrapper';
+          let a=document.createElement('a');a.href=url;a.target='_blank';
+          let img=document.createElement('img');img.src=thumb;img.alt=ep.name;
+          a.appendChild(img);wrap.appendChild(a);
+          if(adminMode){
+            let db=document.createElement('button');db.className='item-btn delete-btn';db.innerHTML='<i class="fas fa-trash"></i>';
+            db.addEventListener('click',()=>{
+              if(confirm('Delete this item?')){
+                ep.items.splice(idx,1);
+                if(!ep.items.length){
+                  model.endpoints=model.endpoints.filter(x=>x!==ep);
+                  if(!model.endpoints.length){
+                    results=results.filter(x=>x!==model);
+                    localStorage.setItem('n3xus_results',JSON.stringify(results));
+                    renderModels(results);renderJPG5(results);showSection('models');return;
                   }
                 }
-                localStorage.setItem('n3xus_results', JSON.stringify(results));
-                renderModels(results);
-                openGallery(model);
+                localStorage.setItem('n3xus_results',JSON.stringify(results));
+                renderModels(results);renderJPG5(results);openGallery(model);
               }
             });
-            wrapper.appendChild(delMediaBtn);
-
-            let editMediaBtn = document.createElement('button');
-            editMediaBtn.className = 'item-btn edit-btn';
-            editMediaBtn.innerHTML = '<i class="fas fa-edit"></i>';
-            editMediaBtn.addEventListener('click', () => {
-              let newUrl = prompt('New media URL:', url);
-              if (newUrl) {
-                if (typeof item === 'object') item.url = newUrl;
-                else ep.items[idx] = newUrl;
-                localStorage.setItem('n3xus_results', JSON.stringify(results));
-                renderModels(results);
-                openGallery(model);
+            wrap.appendChild(db);
+            let eb=document.createElement('button');eb.className='item-btn edit-btn';eb.innerHTML='<i class="fas fa-edit"></i>';
+            eb.addEventListener('click',()=>{
+              let nu=prompt('New media URL:',url);
+              if(nu){
+                if(typeof item==='object') item.url=nu; else ep.items[idx]=nu;
+                localStorage.setItem('n3xus_results',JSON.stringify(results));
+                renderModels(results);renderJPG5(results);openGallery(model);
               }
             });
-            wrapper.appendChild(editMediaBtn);
+            wrap.appendChild(eb);
           }
-
-          grid.appendChild(wrapper);
+          grid.appendChild(wrap);
         });
-
         sec.appendChild(grid);
         albumLinks.appendChild(sec);
       });
     }
 
-    backBtn.addEventListener('click', () => {
-      showSection('search');
-    });
+    backBtn.addEventListener('click',()=>showSection('search'));
 
-    function showSection(sec) {
-      [intro, searchSec, modelsSec, galleryView, faqSec, termsSec].forEach(el => el.style.display = 'none');
-      document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
-      switch (sec) {
-        case 'home':
-          intro.style.display = 'block';
-          menuHome.classList.add('active');
-          break;
-        case 'search':
-          searchSec.style.display = 'block';
-          menuSearch.classList.add('active');
-          break;
-        case 'models':
-          modelsSec.style.display = 'block';
-          menuModels.classList.add('active');
-          break;
-        case 'faq':
-          faqSec.style.display = 'block';
-          menuFaq.classList.add('active');
-          break;
-        case 'terms':
-          termsSec.style.display = 'block';
-          menuTerms.classList.add('active');
-          break;
-      }
+    function showSection(sec){
+      [intro,searchSec,modelsSec,jpg5Sec,galleryView,faqSec,termsSec].forEach(el=>el.style.display='none');
+      document.querySelectorAll('.sidebar a').forEach(a=>a.classList.remove('active'));
+      if(sec==='home'){intro.style.display='block';menuHome.classList.add('active');}
+      else if(sec==='search'){searchSec.style.display='block';menuSearch.classList.add('active');}
+      else if(sec==='models'){modelsSec.style.display='block';menuModels.classList.add('active');}
+      else if(sec==='jpg5'){jpg5Sec.style.display='block';menuJPG5.classList.add('active');}
+      else if(sec==='faq'){faqSec.style.display='block';menuFaq.classList.add('active');}
+      else if(sec==='terms'){termsSec.style.display='block';menuTerms.classList.add('active');}
     }
 
     // JPG5 album fetch
-    async function fetchJPG5Album() {
-      let url = jpg5Input.value.trim();
-      if (!url) return alert('Enter a JPG5 album URL.');
-      showStatus(`Fetching leaks for ${url}…`);
-      try {
-        let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        let data = await res.json();
-        if (!data.images.length) {
-          showStatus(`No leaks found for ${url}`);
-          return;
-        }
-        let model = { name: url, endpoints: [ { name: 'JPG5 Gallery', type: 'gallery', items: data.images } ] };
+    async function fetchJPG5Album(){
+      let url=jpg5Input.value.trim(); if(!url) return alert('Enter a JPG5 album URL.');
+      showStatus(`Fetching images from JPG5 album…`);
+      try{
+        let res=await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`);
+        if(!res.ok) throw '';
+        let data=await res.json();
+        if(!data.images.length){showStatus(`No leaks found for ${url}`);return;}
+        let model={name:url,endpoints:[{name:'JPG5 Gallery',type:'gallery',items:data.images}]};
         results.push(model);
-        localStorage.setItem('n3xus_results', JSON.stringify(results));
-        const notices = model.endpoints.map(ep => `${ep.name.toLowerCase()}: ${ep.items.length}`).join(' • ');
-        showStatus(notices);
-        renderSearch([model]);
-        renderModels(results);
-        showSection('search');
-        clearStatus();
-      } catch (err) {
-        console.error(err);
-        alert('Error fetching JPG5 album.');
-      }
+        localStorage.setItem('n3xus_results',JSON.stringify(results));
+        renderModels(results);renderJPG5(results);
+        showStatus(`jpg5 gallery: ${data.images.length}`);
+        showSection('jpg5');clearStatus();
+      }catch{alert('Error fetching JPG5 album.')}
     }
 
     // Admin activation (Ctrl+I)
-    document.addEventListener('keydown', e => {
-      if (e.ctrlKey && e.key.toLowerCase() === 'i') {
-        let pwd = prompt('Enter admin password:');
-        if (pwd === 'cassidy') {
-          adminMode = true;
-          adminPanel.style.display = 'block';
-          alert('Admin mode enabled.');
-        } else {
-          alert('Incorrect password.');
-        }
+    document.addEventListener('keydown',e=>{
+      if(e.ctrlKey&&e.key.toLowerCase()==='i'){
+        let pwd=prompt('Enter admin password:');
+        if(pwd==='cassidy'){adminMode=true;adminPanel.style.display='block';alert('Admin mode enabled.');}
+        else alert('Incorrect password.');
       }
     });
+
     // ZIP-upload handler (stores images as base64)
-    async function uploadNewModel() {
-      const name = document.getElementById('new-model-name').value.trim();
-      const zipFile = document.getElementById('new-model-zip').files[0];
-      if (!name) return alert('Enter a model name.');
-      if (!zipFile) return alert('Select a ZIP file.');
-      try {
-        const zip = await JSZip.loadAsync(zipFile);
-        const entries = Object.values(zip.files)
-          .filter(f => !f.dir && /\.(jpe?g|png|gif|mp4|webm)$/i.test(f.name));
-        if (entries.length < 20) return alert('ZIP must contain at least 20 images/videos.');
-        const urls = [];
-        for (const file of entries) {
-          const base64 = await file.async('base64');
-          const ext = file.name.split('.').pop().toLowerCase();
-          let mime = 'application/octet-stream';
-          if (['jpg','jpeg'].includes(ext)) mime = 'image/jpeg';
-          else if (ext === 'png') mime = 'image/png';
-          else if (ext === 'gif') mime = 'image/gif';
-          else if (ext === 'mp4') mime = 'video/mp4';
-          else if (ext === 'webm') mime = 'video/webm';
-          const dataURL = `data:${mime};base64,${base64}`;
-          urls.push(dataURL);
+    async function uploadNewModel(){
+      const name=document.getElementById('new-model-name').value.trim();
+      const zipFile=document.getElementById('new-model-zip').files[0];
+      if(!name) return alert('Enter a model name.');
+      if(!zipFile) return alert('Select a ZIP file.');
+      try{
+        const zip=await JSZip.loadAsync(zipFile);
+        const entries=Object.values(zip.files).filter(f=>!f.dir&&/\.(jpe?g|png|gif|mp4|webm)$/i.test(f.name));
+        if(entries.length<20) return alert('ZIP must contain at least 20 images/videos.');
+        const urls=[];
+        for(const file of entries){
+          const base64=await file.async('base64');
+          const ext=file.name.split('.').pop().toLowerCase();
+          let mime='application/octet-stream';
+          if(['jpg','jpeg'].includes(ext)) mime='image/jpeg';
+          else if(ext==='png') mime='image/png';
+          else if(ext==='gif') mime='image/gif';
+          else if(ext==='mp4') mime='video/mp4';
+          else if(ext==='webm') mime='video/webm';
+          urls.push(`data:${mime};base64,${base64}`);
         }
-        results.push({ name, endpoints: [ { name:'Uploaded Model', type:'gallery', items:urls } ] });
-        localStorage.setItem('n3xus_results', JSON.stringify(results));
-        alert('Model uploaded!');
-        renderModels(results);
-        showSection('models');
-      } catch (err) {
-        console.error(err);
-        alert('Error processing ZIP.');
-      }
+        results.push({name,endpoints:[{name:'Uploaded Model',type:'gallery',items:urls}]});
+        localStorage.setItem('n3xus_results',JSON.stringify(results));
+        alert('Model uploaded!');renderModels(results);renderJPG5(results);showSection('models');
+      }catch(e){console.error(e);alert('Error processing ZIP.');}
     }
 
     // Models filter & tools
-    function initModelsTools() {
-      'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter => {
-        let btn = document.createElement('button');
-        btn.textContent = letter;
-        btn.addEventListener('click', () => filterModels(letter));
+    function initModelsTools(){
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter=>{
+        let btn=document.createElement('button');btn.textContent=letter;
+        btn.addEventListener('click',()=>filterModels(letter));
         azList.appendChild(btn);
       });
-      filterIn.addEventListener('input', () => filterModels(filterIn.value.trim()));
+      filterIn.addEventListener('input',()=>filterModels(filterIn.value.trim()));
     }
-    function filterModels(f) {
-      for (let card of modelsGrid.children) {
-        let name = card.querySelector('h3').textContent.toLowerCase();
-        if (f.length === 1) {
-          card.style.display = name.startsWith(f.toLowerCase()) ? 'block' : 'none';
-        } else if (f.length > 1) {
-          card.style.display = name.includes(f.toLowerCase()) ? 'block' : 'none';
-        } else {
-          card.style.display = 'block';
-        }
-      }
+    function filterModels(f){
+      Array.from(modelsGrid.children).forEach(card=>{
+        let name=card.querySelector('h3').textContent.toLowerCase();
+        card.style.display=(!f|| (f.length===1?name.startsWith(f.toLowerCase()):name.includes(f.toLowerCase())))?'block':'none';
+      });
     }
 
     // FAQ accordion
-    function initFAQ() {
-      faqBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-          let panel = btn.nextElementSibling;
-          let icon = btn.querySelector('i');
-          document.querySelectorAll('.panel').forEach(p => p.style.maxHeight = null);
-          document.querySelectorAll('.accordion-item i').forEach(i => i.classList.replace('fa-minus','fa-plus'));
-          if (!panel.style.maxHeight) {
-            panel.style.maxHeight = panel.scrollHeight + 'px';
+    function initFAQ(){
+      faqBtns.forEach(btn=>{
+        btn.addEventListener('click',()=>{
+          let panel=btn.nextElementSibling, icon=btn.querySelector('i');
+          document.querySelectorAll('.panel').forEach(p=>p.style.maxHeight=null);
+          document.querySelectorAll('.accordion-item i').forEach(i=>i.classList.replace('fa-minus','fa-plus'));
+          if(!panel.style.maxHeight){
+            panel.style.maxHeight=panel.scrollHeight+'px';
             icon.classList.replace('fa-plus','fa-minus');
           }
         });
@@ -913,8 +938,8 @@
     }
 
     // Back to top
-    function initBackToTop() {
-      backToTop.addEventListener('click', () => window.scrollTo({ top:0, behavior:'smooth' }));
+    function initBackToTop(){
+      backToTop.addEventListener('click',()=>window.scrollTo({top:0,behavior:'smooth'}));
     }
   </script>
 </body>
