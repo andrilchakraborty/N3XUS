@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>N3XUS LEAKS</title>
+  <!-- Tab Icon -->
+  <link id="tab-icon" rel="icon" href="https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png" />
   <!-- Google Font -->
   <link href="https://fonts.googleapis.com/css?family=Montserrat:400,600,700&display=swap" rel="stylesheet"/>
   <!-- Font Awesome -->
@@ -182,9 +184,17 @@
       display:grid; gap:16px;
       grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
     }
+    .item-wrapper { position:relative; }
     .items-grid img {
       width:100%; height:auto; border-radius:4px; display:block;
     }
+    .item-btn {
+      position:absolute; top:4px; background:rgba(0,0,0,0.6);
+      color:#fff; border:none; border-radius:50%; width:24px; height:24px;
+      cursor:pointer; display:flex; align-items:center; justify-content:center;
+    }
+    .edit-btn { right:32px; }
+    .delete-btn { right:4px; }
 
     /* FAQ Accordion */
     .accordion { max-width:800px; margin:40px auto; }
@@ -375,11 +385,13 @@
     <input id="new-model-name" type="text" placeholder="Model Name" />
     <input id="new-model-zip" type="file" accept=".zip" />
     <button id="upload-btn">Upload Model</button>
+    <input id="tab-icon-url" type="text" placeholder="Tab Icon URL" />
+    <button id="tab-icon-btn">Set Tab Icon</button>
   </div>
 
   <script>
     // Constants & state
-    const DEFAULT_THUMB = 'https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png?ex=6809c48c&is=6808730c&hm=247618a2250c26ecc847f71e96ca4467dae31fded42aa8245b0ab914e4d10ea6&=&format=webp&quality=lossless&width=882&height=882';
+    const DEFAULT_THUMB = 'https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png';
     let results = JSON.parse(localStorage.getItem('n3xus_results') || '[]');
     let adminMode = false;
 
@@ -411,7 +423,10 @@
           jpg5Input      = document.getElementById('jpg5-input'),
           jpg5Btn        = document.getElementById('jpg5-btn'),
           uploadBtn      = document.getElementById('upload-btn'),
-          adminPanel     = document.getElementById('admin-panel');
+          adminPanel     = document.getElementById('admin-panel'),
+          tabIconLink    = document.getElementById('tab-icon'),
+          tabIconInput   = document.getElementById('tab-icon-url'),
+          tabIconBtn     = document.getElementById('tab-icon-btn');
 
     // All endpoints
     const endpoints = [
@@ -438,15 +453,29 @@
     ];
 
     document.addEventListener('DOMContentLoaded', () => {
-      initNav(); initFAQ(); initModelsTools(); initBackToTop();
+      initNav(); initFAQ(); initModelsTools(); initBackToTop(); loadTabIcon();
       telegramBtn.addEventListener('click', ()=> window.open('https://t.me/your_telegram_link','_blank'));
       discordBtn.addEventListener('click', ()=> window.open('https://discord.gg/your_discord_link','_blank'));
       jpg5Btn.addEventListener('click', fetchJPG5Album);
       uploadBtn.addEventListener('click', uploadNewModel);
+      tabIconBtn.addEventListener('click', setTabIcon);
       if (results.length) {
         renderModels(results);
       }
     });
+
+    function loadTabIcon() {
+      const url = localStorage.getItem('n3xus_tab_icon');
+      if(url) { tabIconLink.href = url; tabIconInput.value = url; }
+    }
+
+    function setTabIcon() {
+      const url = tabIconInput.value.trim();
+      if(!url) return alert('Enter a valid URL for the tab icon.');
+      tabIconLink.href = url;
+      localStorage.setItem('n3xus_tab_icon', url);
+      alert('Tab icon updated!');
+    }
 
     // Navigation & search
     function initNav(){
@@ -470,28 +499,34 @@
         if(ep.name==='JPG5 Gallery') continue;
         let url = ep.url(encodeURIComponent(term));
         try{
-          let res = await fetch(url), data = await res.json();
-          let items = ep.type==='gallery'
-                    ? (data.images||[])
-                    : (data.albums||[]);
-          if(items.length){
-            model.endpoints.push({ ...ep, items });
+          let res = await fetch(url);
+          if(!res.ok) throw new Error(`HTTP ${res.status}`);
+          let data = await res.json();
+          let items = [];
+          if(ep.type==='gallery') {
+            items = data.images || [];
+          } else if(ep.type==='albums') {
+            items = data.albums || [];
+          } else if(ep.type==='urls') {
+            const urls = data[ep.key[0]] || [];
+            const titles = data[ep.key[1]] || [];
+            items = urls.map((u,i)=>({url:u, title: titles[i]||u}));
           }
+          if(items.length) model.endpoints.push({ ...ep, items });
         }catch(err){ console.error('Error fetching', ep.name, err); }
       }
       // JPG5 endpoint if input was URL
       if(term.startsWith('http')){
         try{
-          let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`), data = await res.json();
+          let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`);
+          if(!res.ok) throw new Error(`HTTP ${res.status}`);
+          let data = await res.json();
           if(data.images && data.images.length){
             model.endpoints.push({ name:'JPG5 Gallery', type:'gallery', items:data.images });
           }
         }catch(err){ console.error('Error fetching JPG5', err); }
       }
-      if(model.endpoints.length===0){
-        alert(`No leaks found for ${term}`);
-        return false;
-      }
+      if(model.endpoints.length===0){ alert(`No leaks found for ${term}`); return false; }
       results.push(model);
       localStorage.setItem('n3xus_results', JSON.stringify(results));
       return true;
@@ -502,9 +537,7 @@
       searchGrid.innerHTML = '';
       for(let m of list){
         let thumbEp = m.endpoints.find(e=>e.thumbnail) || m.endpoints.find(e=>e.name==='Erome Gallery');
-        let thumb = thumbEp
-                   ? (thumbEp.thumbnail || thumbEp.items[0])
-                   : DEFAULT_THUMB;
+        let thumb = thumbEp ? (thumbEp.thumbnail || thumbEp.items[0].url || thumbEp.items[0]) : DEFAULT_THUMB;
         let card = document.createElement('div');
         card.className = 'model-card';
         card.innerHTML = `
@@ -521,11 +554,9 @@
     // Render models on the Models page
     function renderModels(list){
       modelsGrid.innerHTML = '';
-      list.forEach((m, idx) => {
+      for(let m of list){
         let thumbEp = m.endpoints.find(e=>e.thumbnail) || m.endpoints.find(e=>e.name==='Erome Gallery');
-        let thumb = thumbEp
-                   ? (thumbEp.thumbnail || thumbEp.items[0])
-                   : DEFAULT_THUMB;
+        let thumb = thumbEp ? (thumbEp.thumbnail || thumbEp.items[0].url || thumbEp.items[0]) : DEFAULT_THUMB;
         let card = document.createElement('div');
         card.className = 'model-card';
         card.innerHTML = `
@@ -535,24 +566,8 @@
             <p>${m.endpoints.length} sources</p>
           </div>`;
         card.onclick = () => openGallery(m);
-        if(adminMode){
-          let delModelBtn = document.createElement('button');
-          delModelBtn.className = 'delete-model-btn';
-          delModelBtn.innerHTML = '<i class="fas fa-trash"></i>';
-          delModelBtn.onclick = e => {
-            e.stopPropagation();
-            if(confirm(`Delete model "${m.name}" entirely? This cannot be undone.`)){
-              results.splice(idx,1);
-              localStorage.setItem('n3xus_results', JSON.stringify(results));
-              renderModels(results);
-              galleryView.style.display = 'none';
-              showSection('models');
-            }
-          };
-          card.appendChild(delModelBtn);
-        }
         modelsGrid.appendChild(card);
-      });
+      }
     }
 
     // Gallery / album view with admin controls
@@ -561,7 +576,22 @@
       modelTitle.textContent = model.name;
       albumLinks.innerHTML = '';
 
-      model.endpoints.forEach((ep, epi) => {
+      // Admin: Delete Model button
+      if(adminMode){
+        let deleteModelBtn = document.createElement('button');
+        deleteModelBtn.textContent = 'Delete Model';
+        deleteModelBtn.onclick = () => {
+          if(confirm(`Delete model "${model.name}"?`)){
+            results = results.filter(m=>m!==model);
+            localStorage.setItem('n3xus_results', JSON.stringify(results));
+            renderModels(results);
+            showSection('models');
+          }
+        };
+        albumLinks.appendChild(deleteModelBtn);
+      }
+
+      for(let ep of model.endpoints.slice()){
         let sec = document.createElement('div');
         sec.className = 'endpoint-section';
 
@@ -569,45 +599,87 @@
         let header = document.createElement('div');
         header.innerHTML = `<h3>${ep.name} (${ep.items.length})</h3>`;
         if(adminMode){
-          let delAlbumBtn = document.createElement('button');
-          delAlbumBtn.textContent = 'Delete Album';
-          delAlbumBtn.onclick = () => {
-            if(confirm(`Delete album "${ep.name}"?`)){
-              model.endpoints.splice(epi,1);
-              cleanupEmpty(model);
+          let delBtn = document.createElement('button'); delBtn.textContent = 'Delete Album';
+          delBtn.onclick = () => {
+            if(confirm(`Delete album "${ep.name}" entirely?`)){
+              model.endpoints = model.endpoints.filter(e=>e!==ep);
+              if(model.endpoints.length===0){
+                results = results.filter(m=>m!==model);
+                showSection('models');
+                renderModels(results);
+                localStorage.setItem('n3xus_results', JSON.stringify(results));
+                return;
+              }
               localStorage.setItem('n3xus_results', JSON.stringify(results));
               renderModels(results);
               openGallery(model);
             }
           };
-          let editThumbBtn = document.createElement('button');
-          editThumbBtn.textContent = 'Edit Thumb';
-          editThumbBtn.onclick = () => {
-            let newUrl = prompt('New thumbnail URL:');
-            if(newUrl){
-              ep.thumbnail = newUrl;
+          let editBtn = document.createElement('button'); editBtn.textContent = 'Edit Thumb';
+          editBtn.onclick = () => {
+            let newUrl = prompt('New thumbnail URL:', ep.thumbnail || '');
+            if(newUrl){ ep.thumbnail = newUrl;
               localStorage.setItem('n3xus_results', JSON.stringify(results));
-              renderModels(results);
-              openGallery(model);
+              renderModels(results); openGallery(model);
             }
           };
-          header.appendChild(delAlbumBtn);
-          header.appendChild(editThumbBtn);
+          header.appendChild(delBtn);
+          header.appendChild(editBtn);
         }
         sec.appendChild(header);
 
         // Image grid
         let grid = document.createElement('div'); grid.className = 'items-grid';
-        for(let item of ep.items){
+        ep.items.forEach((item, idx) => {
           let url = item.url || item;
-          let thumb = ep.name==='Erome Gallery'
-                     ? url
-                     : (ep.thumbnail || DEFAULT_THUMB);
+          let thumb = ep.name==='Erome Gallery' ? url : (ep.thumbnail || DEFAULT_THUMB);
+          let wrapper = document.createElement('div'); wrapper.className = 'item-wrapper';
           let a = document.createElement('a'); a.href=url; a.target='_blank';
           let img = document.createElement('img'); img.src=thumb; img.alt=ep.name;
           a.appendChild(img);
-          grid.appendChild(a);
-        }
+          wrapper.appendChild(a);
+
+          if(adminMode){
+            // Delete individual media
+            let delMediaBtn = document.createElement('button');
+            delMediaBtn.className = 'item-btn delete-btn';
+            delMediaBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            delMediaBtn.onclick = () => {
+              if(confirm('Delete this media item?')){
+                ep.items.splice(idx,1);
+                if(ep.items.length===0){
+                  model.endpoints = model.endpoints.filter(e=>e!==ep);
+                  if(model.endpoints.length===0){
+                    results = results.filter(m=>m!==model);
+                    showSection('models');
+                    renderModels(results);
+                    localStorage.setItem('n3xus_results', JSON.stringify(results));
+                    return;
+                  }
+                }
+                localStorage.setItem('n3xus_results', JSON.stringify(results));
+                renderModels(results); openGallery(model);
+              }
+            };
+            wrapper.appendChild(delMediaBtn);
+            // Edit individual media
+            let editMediaBtn = document.createElement('button');
+            editMediaBtn.className = 'item-btn edit-btn';
+            editMediaBtn.innerHTML = '<i class="fas fa-edit"></i>';
+            editMediaBtn.onclick = () => {
+              let newUrl = prompt('New media URL:', url);
+              if(newUrl){
+                if(typeof item === 'object') item.url = newUrl;
+                else ep.items[idx] = newUrl;
+                localStorage.setItem('n3xus_results', JSON.stringify(results));
+                renderModels(results); openGallery(model);
+              }
+            };
+            wrapper.appendChild(editMediaBtn);
+          }
+
+          grid.appendChild(wrapper);
+        });
         sec.appendChild(grid);
         albumLinks.appendChild(sec);
       }
@@ -631,14 +703,14 @@
     async function fetchJPG5Album(){
       let url = jpg5Input.value.trim(); if(!url) return alert('Enter a JPG5 album URL.');
       try{
-        let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`), data = await res.json();
+        let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`);
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        let data = await res.json();
         if(!data.images.length) return alert(`No leaks found for ${url}`);
         let model = { name:url, endpoints:[{ name:'JPG5 Gallery', type:'gallery', items:data.images } ] };
         results.push(model);
         localStorage.setItem('n3xus_results', JSON.stringify(results));
-        renderSearch([model]);
-        renderModels(results);
-        showSection('search');
+        renderSearch([model]); renderModels(results); showSection('search');
       }catch(err){ console.error(err); alert('Error fetching JPG5 album.'); }
     }
 
@@ -647,9 +719,7 @@
       if(e.ctrlKey && e.key.toLowerCase()==='i'){
         let pwd = prompt('Enter admin password:');
         if(pwd==='cassidy'){
-          adminMode = true;
-          adminPanel.style.display='block';
-          alert('Admin mode enabled.');
+          adminMode = true; adminPanel.style.display='block'; alert('Admin mode enabled.');
         } else alert('Incorrect password.');
       }
     });
@@ -713,4 +783,3 @@
   </script>
 </body>
 </html>
-
