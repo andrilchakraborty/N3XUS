@@ -428,7 +428,7 @@
           tabIconInput   = document.getElementById('tab-icon-url'),
           tabIconBtn     = document.getElementById('tab-icon-btn');
 
-    // All endpoints
+    // All endpoints, with corrected Bunkr parameter names
     const endpoints = [
       { name:'Erome Gallery',   url:q=>`/api/erome-gallery?query=${q}`,       type:'gallery' },
       { name:'Erome Albums',    url:q=>`/api/erome-albums?username=${q}`,     type:'albums'  },
@@ -485,6 +485,8 @@
       searchForm.addEventListener('submit',async e=>{
         e.preventDefault();
         let q = searchIn.value.trim(); if(!q) return;
+        // Inform user that search is in progress
+        alert(`Fetching leaks for ${q}. Please check the Search section for results and wait a moment.`);
         let success = await doSearch(q);
         if(!success) return;
         renderSearch([results[results.length-1]]);
@@ -618,7 +620,8 @@
           let editBtn = document.createElement('button'); editBtn.textContent = 'Edit Thumb';
           editBtn.onclick = () => {
             let newUrl = prompt('New thumbnail URL:', ep.thumbnail || '');
-            if(newUrl){ ep.thumbnail = newUrl;
+            if(newUrl){
+              ep.thumbnail = newUrl;
               localStorage.setItem('n3xus_results', JSON.stringify(results));
               renderModels(results); openGallery(model);
             }
@@ -770,7 +773,7 @@
 
     // FAQ accordion
     function initFAQ(){
-      faqBtns.forEach(btn=>btn.onclick=()=>{
+      faqBtns.forEach(btn=>btn.onclick=>{
         let pan=btn.nextElementSibling, ic=btn.querySelector('i');
         document.querySelectorAll('.panel').forEach(p=>p.style.maxHeight=null);
         document.querySelectorAll('.accordion-item i').forEach(i=>i.classList.replace('fa-minus','fa-plus'));
