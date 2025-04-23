@@ -1,4 +1,3 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -380,7 +379,7 @@
 
   <script>
     // Constants & state
-    const DEFAULT_THUMB = 'https://via.placeholder.com/160x100?text=Thumbnail';
+    const DEFAULT_THUMB = 'https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png?ex=6809c48c&is=6808730c&hm=247618a2250c26ecc847f71e96ca4467dae31fded42aa8245b0ab914e4d10ea6&=&format=webp&quality=lossless&width=882&height=882';
     let results = JSON.parse(localStorage.getItem('n3xus_results') || '[]');
     let adminMode = false;
 
@@ -414,11 +413,26 @@
           uploadBtn      = document.getElementById('upload-btn'),
           adminPanel     = document.getElementById('admin-panel');
 
-    // Your existing endpoints array unchanged
+    // All endpoints
     const endpoints = [
       { name:'Erome Gallery',   url:q=>`/api/erome-gallery?query=${q}`,       type:'gallery' },
       { name:'Erome Albums',    url:q=>`/api/erome-albums?username=${q}`,     type:'albums'  },
-      /* … all the others … */
+      { name:'Bunkr Gallery',   url:q=>`/api/bunkr-gallery?query=${q}`,       type:'gallery' },
+      { name:'Bunkr Albums',    url:q=>`/api/bunkr-albums?query=${q}`,        type:'albums'  },
+      { name:'NotFans',         url:q=>`/api/notfans?search_term=${q}`,       type:'urls',   key:['urls','titles'] },
+      { name:'Influencers',     url:q=>`/api/influencers?term=${q}`,          type:'urls',   key:['urls','titles'] },
+      { name:'Thothub',         url:q=>`/api/thothub?term=${q}`,              type:'urls',   key:['urls','titles'] },
+      { name:'DirtyShip',       url:q=>`/api/dirtyship?term=${q}`,            type:'urls',   key:['urls','titles'] },
+      { name:'PimpBunny',       url:q=>`/api/pimpbunny?term=${q}`,            type:'urls',   key:['urls','titles'] },
+      { name:'LeakedZone',      url:q=>`/api/leakedzone?term=${q}`,           type:'urls',   key:['urls','titles'] },
+      { name:'FanslyLeaked',    url:q=>`/api/fanslyleaked?term=${q}`,         type:'urls',   key:['urls','titles'] },
+      { name:'GotAnyNudes',     url:q=>`/api/gotanynudes?term=${q}`,          type:'urls',   key:['urls','titles'] },
+      { name:'NSFW247',         url:q=>`/api/nsfw247?term=${q}`,             type:'urls',   key:['urls','titles'] },
+      { name:'HornySimp',       url:q=>`/api/hornysimp?term=${q}`,           type:'urls',   key:['urls','titles'] },
+      { name:'Porntn',          url:q=>`/api/porntn?term=${q}`,              type:'urls',   key:['urls','titles'] },
+      { name:'xxBrits',         url:q=>`/api/xxbrits?term=${q}`,             type:'urls',   key:['urls','titles'] },
+      { name:'BitchesGirls',    url:q=>`/api/bitchesgirls?term=${q}`,        type:'urls',   key:['urls','titles'] },
+      { name:'ThotsLife',       url:q=>`/api/thotslife?term=${q}`,           type:'urls',   key:['urls','titles'] },
       { name:'Fapello Gallery', url:q=>`/api/fapello-gallery?album_url=${q}`,type:'gallery' },
       { name:'JPG5 Gallery',    url:q=>`/api/jpg5-gallery?album_url=${q}`,    type:'gallery' }
     ];
@@ -429,7 +443,9 @@
       discordBtn.addEventListener('click', ()=> window.open('https://discord.gg/your_discord_link','_blank'));
       jpg5Btn.addEventListener('click', fetchJPG5Album);
       uploadBtn.addEventListener('click', uploadNewModel);
-      if (results.length) renderModels(results);
+      if (results.length) {
+        renderModels(results);
+      }
     });
 
     // Navigation & search
@@ -439,71 +455,86 @@
       });
       searchForm.addEventListener('submit',async e=>{
         e.preventDefault();
-        let q=searchIn.value.trim(); if(!q) return;
-        await doSearch(q);
+        let q = searchIn.value.trim(); if(!q) return;
+        let success = await doSearch(q);
+        if(!success) return;
         renderSearch([results[results.length-1]]);
+        renderModels(results);
         showSection('search');
       });
     }
+
     async function doSearch(term){
-      let model={name:term,endpoints:[]};
+      let model = { name:term, endpoints:[] };
       for(let ep of endpoints){
         if(ep.name==='JPG5 Gallery') continue;
-        let url=ep.url(encodeURIComponent(term));
+        let url = ep.url(encodeURIComponent(term));
         try{
-          let res=await fetch(url), data=await res.json();
-          let items= ep.type==='gallery'? data.images||[]
-                   : ep.type==='albums'? data.albums||[]
-                   : data[ep.key[0]].map((u,i)=>({url:u,title:data[ep.key[1]][i]}));
-          if(items.length) model.endpoints.push({...ep,items});
-        }catch{}
+          let res = await fetch(url), data = await res.json();
+          let items = ep.type==='gallery'
+                    ? (data.images||[])
+                    : (data.albums||[]);
+          if(items.length){
+            model.endpoints.push({ ...ep, items });
+          }
+        }catch(err){ console.error('Error fetching', ep.name, err); }
       }
-      // JPG5 endpoint if search term was a URL
+      // JPG5 endpoint if input was URL
       if(term.startsWith('http')){
         try{
-          let res=await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`),
-              data=await res.json();
-          if(data.images.length) model.endpoints.push({name:'JPG5 Gallery',type:'gallery',items:data.images});
-        }catch{}
+          let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(term)}`), data = await res.json();
+          if(data.images && data.images.length){
+            model.endpoints.push({ name:'JPG5 Gallery', type:'gallery', items:data.images });
+          }
+        }catch(err){ console.error('Error fetching JPG5', err); }
+      }
+      if(model.endpoints.length===0){
+        alert(`No leaks found for ${term}`);
+        return false;
       }
       results.push(model);
-      localStorage.setItem('n3xus_results',JSON.stringify(results));
+      localStorage.setItem('n3xus_results', JSON.stringify(results));
+      return true;
     }
 
     // Render search results
     function renderSearch(list){
-      searchGrid.innerHTML='';
+      searchGrid.innerHTML = '';
       for(let m of list){
-        let thumbEp = m.endpoints.find(e=>e.name==='Erome Gallery'),
-            thumb   = thumbEp? thumbEp.items[0] : DEFAULT_THUMB;
-        let card=document.createElement('div');
-        card.className='model-card';
-        card.innerHTML=`
+        let thumbEp = m.endpoints.find(e=>e.thumbnail) || m.endpoints.find(e=>e.name==='Erome Gallery');
+        let thumb = thumbEp
+                   ? (thumbEp.thumbnail || thumbEp.items[0])
+                   : DEFAULT_THUMB;
+        let card = document.createElement('div');
+        card.className = 'model-card';
+        card.innerHTML = `
           <img src="${thumb}" alt="${m.name} thumbnail"/>
           <div class="info">
             <h3>${m.name}</h3>
             <p>${m.endpoints.length} sources</p>
           </div>`;
-        card.onclick=()=>openGallery(m);
+        card.onclick = () => openGallery(m);
         searchGrid.appendChild(card);
       }
     }
 
     // Render models on the Models page
     function renderModels(list){
-      modelsGrid.innerHTML='';
+      modelsGrid.innerHTML = '';
       for(let m of list){
-        let thumbEp = m.endpoints.find(e=>e.name==='Erome Gallery'),
-            thumb   = thumbEp? thumbEp.items[0] : DEFAULT_THUMB;
-        let card=document.createElement('div');
-        card.className='model-card';
-        card.innerHTML=`
+        let thumbEp = m.endpoints.find(e=>e.thumbnail) || m.endpoints.find(e=>e.name==='Erome Gallery');
+        let thumb = thumbEp
+                   ? (thumbEp.thumbnail || thumbEp.items[0])
+                   : DEFAULT_THUMB;
+        let card = document.createElement('div');
+        card.className = 'model-card';
+        card.innerHTML = `
           <img src="${thumb}" alt="${m.name} thumbnail"/>
           <div class="info">
             <h3>${m.name}</h3>
             <p>${m.endpoints.length} sources</p>
           </div>`;
-        card.onclick=()=>openGallery(m);
+        card.onclick = () => openGallery(m);
         modelsGrid.appendChild(card);
       }
     }
@@ -512,7 +543,7 @@
     function openGallery(model){
       showSection(''); galleryView.style.display='block';
       modelTitle.textContent = model.name;
-      albumLinks.innerHTML    = '';
+      albumLinks.innerHTML = '';
 
       for(let ep of model.endpoints){
         let sec = document.createElement('div');
@@ -522,22 +553,22 @@
         let header = document.createElement('div');
         header.innerHTML = `<h3>${ep.name} (${ep.items.length})</h3>`;
         if(adminMode){
-          let delBtn = document.createElement('button');
-          delBtn.textContent='Delete Album';
-          delBtn.onclick=()=>{
+          let delBtn = document.createElement('button'); delBtn.textContent = 'Delete Album';
+          delBtn.onclick = () => {
             if(confirm(`Delete album "${ep.name}"?`)){
               model.endpoints = model.endpoints.filter(e=>e!==ep);
-              localStorage.setItem('n3xus_results',JSON.stringify(results));
+              localStorage.setItem('n3xus_results', JSON.stringify(results));
+              renderModels(results);
               openGallery(model);
             }
           };
-          let editBtn = document.createElement('button');
-          editBtn.textContent='Edit Thumb';
-          editBtn.onclick=()=>{
+          let editBtn = document.createElement('button'); editBtn.textContent = 'Edit Thumb';
+          editBtn.onclick = () => {
             let newUrl = prompt('New thumbnail URL:');
             if(newUrl){
-              ep.items[0] = newUrl;
-              localStorage.setItem('n3xus_results',JSON.stringify(results));
+              ep.thumbnail = newUrl;
+              localStorage.setItem('n3xus_results', JSON.stringify(results));
+              renderModels(results);
               openGallery(model);
             }
           };
@@ -547,17 +578,14 @@
         sec.appendChild(header);
 
         // Image grid
-        let grid = document.createElement('div');
-        grid.className = 'items-grid';
+        let grid = document.createElement('div'); grid.className = 'items-grid';
         for(let item of ep.items){
-          let url   = typeof item==='string'? item : item.url;
-          let thumb = ep.name==='Erome Gallery'? url : DEFAULT_THUMB;
-          let a     = document.createElement('a');
-          a.href    = url;
-          a.target  = '_blank';
-          let img   = document.createElement('img');
-          img.src   = thumb;
-          img.alt   = ep.name;
+          let url = item.url || item;
+          let thumb = ep.name==='Erome Gallery'
+                     ? url
+                     : (ep.thumbnail || DEFAULT_THUMB);
+          let a = document.createElement('a'); a.href=url; a.target='_blank';
+          let img = document.createElement('img'); img.src=thumb; img.alt=ep.name;
           a.appendChild(img);
           grid.appendChild(a);
         }
@@ -566,37 +594,33 @@
       }
     }
 
-    backBtn.onclick=()=> showSection('search');
+    backBtn.onclick = () => showSection('search');
 
     function showSection(sec){
       [intro,searchSec,modelsSec,galleryView,faqSec,termsSec].forEach(el=>el.style.display='none');
       document.querySelectorAll('.sidebar a').forEach(a=>a.classList.remove('active'));
       switch(sec){
-        case 'home':  intro.style.display='block';   menuHome.classList.add('active');    break;
-        case 'search':searchSec.style.display='block';menuSearch.classList.add('active');  break;
-        case 'models':modelsSec.style.display='block';menuModels.classList.add('active');  break;
-        case 'faq':   faqSec.style.display='block';   menuFaq.classList.add('active');     break;
-        case 'terms': termsSec.style.display='block'; menuTerms.classList.add('active');   break;
+        case 'home':   intro.style.display='block';    menuHome.classList.add('active');    break;
+        case 'search': searchSec.style.display='block'; menuSearch.classList.add('active');  break;
+        case 'models': modelsSec.style.display='block'; menuModels.classList.add('active');  break;
+        case 'faq':    faqSec.style.display='block';    menuFaq.classList.add('active');     break;
+        case 'terms':  termsSec.style.display='block';  menuTerms.classList.add('active');   break;
       }
     }
 
     // JPG5 album fetch
     async function fetchJPG5Album(){
-      let url = jpg5Input.value.trim();
-      if(!url) return alert('Enter a JPG5 album URL.');
+      let url = jpg5Input.value.trim(); if(!url) return alert('Enter a JPG5 album URL.');
       try{
-        let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`),
-            data= await res.json();
-        if(!data.images.length) return alert('No images found.');
-        let model = { name:url, endpoints:[{name:'JPG5 Gallery',type:'gallery',items:data.images}] };
+        let res = await fetch(`/api/jpg5-gallery?album_url=${encodeURIComponent(url)}`), data = await res.json();
+        if(!data.images.length) return alert(`No leaks found for ${url}`);
+        let model = { name:url, endpoints:[{ name:'JPG5 Gallery', type:'gallery', items:data.images } ] };
         results.push(model);
-        localStorage.setItem('n3xus_results',JSON.stringify(results));
+        localStorage.setItem('n3xus_results', JSON.stringify(results));
         renderSearch([model]);
+        renderModels(results);
         showSection('search');
-      }catch(err){
-        console.error(err);
-        alert('Error fetching JPG5 album.');
-      }
+      }catch(err){ console.error(err); alert('Error fetching JPG5 album.'); }
     }
 
     // Admin activation (Ctrl+I)
@@ -607,44 +631,38 @@
           adminMode = true;
           adminPanel.style.display='block';
           alert('Admin mode enabled.');
-        } else {
-          alert('Incorrect password.');
-        }
+        } else alert('Incorrect password.');
       }
     });
 
-    // ZIP-upload handler (adapted)
+    // ZIP-upload handler
     async function uploadNewModel(){
-      const name = document.getElementById("new-model-name").value.trim();
-      const zipFile = document.getElementById("new-model-zip").files[0];
-      if(!name) return alert("Enter a model name.");
-      if(!zipFile) return alert("Select a ZIP file.");
+      const name = document.getElementById('new-model-name').value.trim();
+      const zipFile = document.getElementById('new-model-zip').files[0];
+      if(!name) return alert('Enter a model name.');
+      if(!zipFile) return alert('Select a ZIP file.');
       try {
         const zip = await JSZip.loadAsync(zipFile);
         const entries = Object.values(zip.files)
           .filter(f=>!f.dir&&/\.(jpe?g|png|gif|mp4|webm)$/i.test(f.name));
-        if(entries.length<20) return alert("ZIP must contain at least 20 images/videos.");
-        const urls=[];
+        if(entries.length<20) return alert('ZIP must contain at least 20 images/videos.');
+        const urls = [];
         for(const file of entries){
-          const blob = await file.async("blob");
+          const blob = await file.async('blob');
           urls.push(URL.createObjectURL(blob));
         }
-        results.push({ name, endpoints:[{name:'Uploaded Model',type:'gallery',items:urls}] });
-        localStorage.setItem('n3xus_results',JSON.stringify(results));
-        alert("Model uploaded!");
+        results.push({ name, endpoints:[{ name:'Uploaded Model', type:'gallery', items:urls }] });
+        localStorage.setItem('n3xus_results', JSON.stringify(results));
+        alert('Model uploaded!');
         renderModels(results);
         showSection('models');
-      } catch(err){
-        console.error(err);
-        alert("Error processing ZIP.");
-      }
+      } catch(err){ console.error(err); alert('Error processing ZIP.'); }
     }
 
     // Models filter & tools
     function initModelsTools(){
       'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter=>{
-        let btn=document.createElement('button');
-        btn.textContent=letter;
+        let btn = document.createElement('button'); btn.textContent=letter;
         btn.onclick=()=>filterModels(letter);
         azList.appendChild(btn);
       });
@@ -657,9 +675,7 @@
           card.style.display = name.startsWith(f.toLowerCase())?'block':'none';
         } else if(f.length>1){
           card.style.display = name.includes(f.toLowerCase())?'block':'none';
-        } else {
-          card.style.display = 'block';
-        }
+        } else card.style.display='block';
       }
     }
 
@@ -669,17 +685,13 @@
         let pan=btn.nextElementSibling, ic=btn.querySelector('i');
         document.querySelectorAll('.panel').forEach(p=>p.style.maxHeight=null);
         document.querySelectorAll('.accordion-item i').forEach(i=>i.classList.replace('fa-minus','fa-plus'));
-        if(!pan.style.maxHeight){
-          pan.style.maxHeight=pan.scrollHeight+'px';
-          ic.classList.replace('fa-plus','fa-minus');
-        }
+        if(!pan.style.maxHeight){ pan.style.maxHeight=pan.scrollHeight+'px'; ic.classList.replace('fa-plus','fa-minus'); }
       });
     }
 
     // Back to top
-    function initBackToTop(){
-      backToTop.onclick=()=>window.scrollTo({top:0,behavior:'smooth'});
-    }
+    function initBackToTop(){ backToTop.onclick=()=>window.scrollTo({top:0,behavior:'smooth'}); }
   </script>
 </body>
 </html>
+
