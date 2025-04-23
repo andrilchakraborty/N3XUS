@@ -16,7 +16,7 @@
     :root {
       --bg-dark: #0d0d0f;
       --bg-darker: #131318;
-      --text-light: #e1e1e6;
+      --text-light: #e1e16;
       --text-muted: #7a7a8c;
       --accent: #e6007e;
       --accent-hover: #ff1a95;
@@ -528,20 +528,17 @@
         e.preventDefault();
         let q = searchIn.value.trim();
         if (!q) return;
-        // show initial fetching message
         showStatus(`Fetching leaks for ${q}…`);
         let success = await doSearch(q);
         if (!success) {
           showStatus(`No leaks found for ${q}`);
           return;
         }
-        // build little notices
         const model = results[results.length - 1];
         const notices = model.endpoints
           .map(ep => `${ep.name.toLowerCase()}: ${ep.items.length}`)
           .join(' • ');
         showStatus(notices);
-        // render and then clear message
         renderSearch([ model ]);
         renderModels(results);
         showSection('search');
@@ -608,7 +605,7 @@
             <h3>${m.name}</h3>
             <p>${m.endpoints.length} sources</p>
           </div>`;
-        card.addEventListener('click', () => openGallery(m));
+        card.addEventListener('click', () => openGallery(m));  
         searchGrid.appendChild(card);
       }
     }
@@ -639,6 +636,11 @@
       modelTitle.textContent = model.name;
       albumLinks.innerHTML = '';
 
+      // Reorder: all except Erome Gallery first, then Erome Gallery last
+      const ordered = model.endpoints
+        .filter(ep => ep.name !== 'Erome Gallery')
+        .concat(model.endpoints.filter(ep => ep.name === 'Erome Gallery'));
+
       if (adminMode) {
         let deleteModelBtn = document.createElement('button');
         deleteModelBtn.textContent = 'Delete Model';
@@ -653,7 +655,7 @@
         albumLinks.appendChild(deleteModelBtn);
       }
 
-      model.endpoints.forEach((ep, epIndex) => {
+      ordered.forEach((ep, epIndex) => {
         let sec = document.createElement('div');
         sec.className = 'endpoint-section';
 
@@ -664,7 +666,7 @@
           delBtn.textContent = 'Delete Album';
           delBtn.addEventListener('click', () => {
             if (confirm(`Delete album "${ep.name}" entirely?`)) {
-              model.endpoints.splice(epIndex, 1);
+              model.endpoints.splice(model.endpoints.indexOf(ep), 1);
               if (!model.endpoints.length) {
                 results = results.filter(m => m !== model);
                 localStorage.setItem('n3xus_results', JSON.stringify(results));
@@ -717,7 +719,7 @@
               if (confirm('Delete this media item?')) {
                 ep.items.splice(idx, 1);
                 if (!ep.items.length) {
-                  model.endpoints = model.endpoints.filter((_, i) => i !== epIndex);
+                  model.endpoints = model.endpoints.filter(e => e !== ep);
                   if (!model.endpoints.length) {
                     results = results.filter(m => m !== model);
                     localStorage.setItem('n3xus_results', JSON.stringify(results));
@@ -830,7 +832,7 @@
       }
     });
 
-    // ZIP-upload handler
+    // ZIP-upload handler (stores images as base64, not blob URLs)
     async function uploadNewModel() {
       const name = document.getElementById('new-model-name').value.trim();
       const zipFile = document.getElementById('new-model-zip').files[0];
@@ -843,8 +845,16 @@
         if (entries.length < 20) return alert('ZIP must contain at least 20 images/videos.');
         const urls = [];
         for (const file of entries) {
-          const blob = await file.async('blob');
-          urls.push(URL.createObjectURL(blob));
+          const base64 = await file.async('base64');
+          const ext = file.name.split('.').pop().toLowerCase();
+          let mime = 'application/octet-stream';
+          if (['jpg','jpeg'].includes(ext)) mime = 'image/jpeg';
+          else if (ext === 'png') mime = 'image/png';
+          else if (ext === 'gif') mime = 'image/gif';
+          else if (ext === 'mp4') mime = 'video/mp4';
+          else if (ext === 'webm') mime = 'video/webm';
+          const dataURL = `data:${mime};base64,${base64}`;
+          urls.push(dataURL);
         }
         results.push({ name, endpoints: [ { name:'Uploaded Model', type:'gallery', items:urls } ] });
         localStorage.setItem('n3xus_results', JSON.stringify(results));
