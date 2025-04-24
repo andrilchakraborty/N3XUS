@@ -9,7 +9,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import List, Tuple
@@ -37,7 +37,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
 templates = Jinja2Templates(directory="templates")
 
 # ---- Root endpoint ----
@@ -656,7 +656,7 @@ async def fetch_xxbrits(search_term: str) -> Tuple[List[str], List[str]]:
             html = await resp.text()
         soup = BeautifulSoup(html, "html.parser")
         offsets = []
-        for a in sopa.find_all("a", href="#search", attrs={"data-parameters": True}):
+        for a in soup.find_all("a", href="#search", attrs={"data-parameters": True}):
             for part in a["data-parameters"].split(";"):
                 if ":" in part:
                     _, v = part.split(":", 1)
