@@ -288,297 +288,201 @@ async def fetch_notfans(search_term: str, debug: bool = False) -> Tuple[List[str
     return urls, titles
 
 async def fetch_influencers(term: str) -> Tuple[List[str], List[str]]:
-    base = "https://influencersgonewild.com/"
-    urls, titles = [], []
-    page = 1
-    page_urls = []
+    urls, titles, page = [], [], 1
     async with aiohttp.ClientSession() as session:
         while True:
-            url = f"{base}?s={term}&paged={page}"
+            url = f"https://influencersgonewild.com/?s={term}&paged={page}"
+            print(f"[influencers] {url}")
             async with session.get(url) as r:
                 text = await r.text()
             soup = BeautifulSoup(text, "html.parser")
             items = soup.find_all("a", class_="g1-frame")
             if not items:
                 break
-            page_urls.append(url)
-            page += 1
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                t2 = await r2.text()
-            soup2 = BeautifulSoup(t2, "html.parser")
-            for a in soup2.find_all("a", class_="g1-frame"):
+            for a in items:
                 href = a.get("href")
                 title = a.get("title") or a.text.strip()
-                us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                urls.append(href); titles.append(title)
+            page += 1
     return urls, titles
 
 async def fetch_thothub(term: str) -> Tuple[List[str], List[str]]:
-    base = "https://thothub.to/search"
-    urls, titles = [], []
-    seen = set()
-    page = 1
-    page_urls = []
+    urls, titles, seen, page = [], [], set(), 1
     async with aiohttp.ClientSession() as session:
         while True:
-            url = f"{base}/{term}/?page={page}"
+            url = f"https://thothub.to/search/{term}/?page={page}"
+            print(f"[thothub] {url}")
             async with session.get(url) as r:
                 text = await r.text()
             soup = BeautifulSoup(text, "html.parser")
             items = [a for a in soup.select('a[title]') if not a.find("span", class_="line-private")]
-            if not any(a["href"] not in seen for a in items):
+            new = False
+            for a in items:
+                href, title = a["href"], a["title"]
+                if href in seen: continue
+                seen.add(href); urls.append(href); titles.append(title)
+                new = True
+            if not new:
                 break
-            page_urls.append(url)
             page += 1
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                t2 = await r2.text()
-            soup2 = BeautifulSoup(t2, "html.parser")
-            for a in soup2.select('a[title]'):
-                if not a.find("span", class_="line-private"):
-                    href = a["href"]; title = a["title"]
-                    if href not in seen:
-                        seen.add(href); us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
     return urls, titles
 
 async def fetch_dirtyship(term: str) -> Tuple[List[str], List[str]]:
-    base = "https://dirtyship.com"
-    urls, titles = [], []
-    page = 1
-    page_urls = []
+    urls, titles, page = [], [], 1
     async with aiohttp.ClientSession() as session:
         while True:
-            url = f"{base}/page/{page}/?search_param=all&s={term}"
+            url = f"https://dirtyship.com/page/{page}/?search_param=all&s={term}"
+            print(f"[dirtyship] {url}")
             async with session.get(url) as r:
                 text = await r.text()
             soup = BeautifulSoup(text, "html.parser")
             items = soup.find_all("a", id="preview_image")
             if not items:
                 break
-            page_urls.append(url)
-            page += 1
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                t2 = await r2.text()
-            soup2 = BeautifulSoup(t2, "html.parser")
-            for a in soup2.find_all("a", id="preview_image"):
+            for a in items:
                 href = a["href"]
                 title = a.get("title") or a.text.strip()
-                us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                urls.append(href); titles.append(title)
+            page += 1
     return urls, titles
 
 async def fetch_pimpbunny(term: str) -> Tuple[List[str], List[str]]:
-    url = f"https://pimpbunny.com/search/{term}/"
     urls, titles = [], []
+    url = f"https://pimpbunny.com/search/{term}/"
     async with aiohttp.ClientSession() as session:
-        page_urls = [url]
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r:
-                text = await r.text()
-            soup = BeautifulSoup(text, "html.parser")
-            for a in soup.find_all("a", class_="pb-item-link"):
-                href = a["href"]
-                title = a.get("title") or a.text.strip()
-                us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+        print(f"[pimpbunny] {url}")
+        async with session.get(url) as r:
+            text = await r.text()
+        soup = BeautifulSoup(text, "html.parser")
+        for a in soup.find_all("a", class_="pb-item-link"):
+            href = a["href"]
+            title = a.get("title") or a.text.strip()
+            urls.append(href); titles.append(title)
     return urls, titles
 
 async def fetch_leakedzone(term: str) -> Tuple[List[str], List[str]]:
-    url = f"https://leakedzone.com/search?search={term}"
     urls, titles = [], []
+    url = f"https://leakedzone.com/search?search={term}"
     async with aiohttp.ClientSession() as session:
-        page_urls = [url]
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r:
-                text = await r.text()
-            soup = BeautifulSoup(text, "html.parser")
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                if href.startswith("https://leakedzone.com/") and term.lower().replace(" ", "") in href.lower():
-                    title = a.get("title") or a.text.strip()
-                    us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+        print(f"[leakedzone] {url}")
+        async with session.get(url) as r:
+            text = await r.text()
+        soup = BeautifulSoup(text, "html.parser")
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.startswith("https://leakedzone.com/") and term.lower().replace(" ", "") in href.lower():
+                title = a.get("title") or a.text.strip()
+                urls.append(href); titles.append(title)
     return urls, titles
 
 async def fetch_fanslyleaked(term: str) -> Tuple[List[str], List[str]]:
-    base = "https://ww1.fanslyleaked.com"
-    urls, titles = [], []
-    seen = set()
-    page = 1
-    page_urls = []
+    urls, titles, seen, page = [], [], set(), 1
     async with aiohttp.ClientSession() as session:
         while True:
-            url = f"{base}/page/{page}/?s={term}"
+            url = f"https://ww1.fanslyleaked.com/page/{page}/?s={term}"
+            print(f"[fanslyleaked] {url}")
             async with session.get(url) as r:
                 text = await r.text()
             soup = BeautifulSoup(text, "html.parser")
             items = soup.find_all("a", href=True, title=True)
-            if not any(
-                (href := (a["href"].startswith("/") and base + a["href"] or a["href"]))
-                and href.startswith(base)
-                and not any(x in href for x in ["/page/", "?s=", "#"])
-                and href not in seen
-                for a in items
-            ):
-                break
-            page_urls.append(url)
-            page += 1
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                t2 = await r2.text()
-            soup2 = BeautifulSoup(t2, "html.parser")
-            for a in soup2.find_all("a", href=True, title=True):
-                href = a["href"]
+            new = False
+            for a in items:
+                href, title = a["href"], a["title"]
                 if href.startswith("/"):
-                    href = base + href
-                if (
-                    href.startswith(base)
-                    and not any(x in href for x in ["/page/", "?s=", "#"])
-                    and href not in seen
-                ):
-                    seen.add(href); us.append(href); ts.append(a["title"])
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                    href = "https://ww1.fanslyleaked.com" + href
+                if not href.startswith("https://ww1.fanslyleaked.com/"):
+                    continue
+                if any(x in href for x in ["/page/", "?s=", "#"]):
+                    continue
+                if href in seen:
+                    continue
+                seen.add(href); urls.append(href); titles.append(title)
+                new = True
+            if not new:
+                break
+            page += 1
     return urls, titles
+
+def _normalize(s: str) -> str:
+    return "".join(s.lower().split())
 
 async def fetch_gotanynudes(search_term: str) -> Tuple[List[str], List[str]]:
     query = search_term.replace(" ", "+")
-    base1 = f"https://gotanynudes.com/?s={query}"
-    base_n = lambda p: f"https://gotanynudes.com/page/{p}/?s={query}"
+    page = 1
     urls, titles = [], []
     normalized = _normalize(search_term)
-    page = 1
-    page_urls = []
     async with aiohttp.ClientSession() as session:
         while True:
-            url = base1 if page == 1 else base_n(page)
+            url = (
+                f"https://gotanynudes.com/?s={query}"
+                if page == 1
+                else f"https://gotanynudes.com/page/{page}/?s={query}"
+            )
+            print(f"[gotanynudes] {url}")
             async with session.get(url) as r:
                 html = await r.text()
             soup = BeautifulSoup(html, "html.parser")
-            found = any(
-                normalized in _normalize(a["title"].strip())
-                for a in soup.find_all("a", class_="g1-frame", title=True, href=True)
-            )
-            if not found:
-                break
-            page_urls.append(url)
-            page += 1
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                html2 = await r2.text()
-            soup2 = BeautifulSoup(html2, "html.parser")
-            for a in soup2.find_all("a", class_="g1-frame", title=True, href=True):
+            found = 0
+            for a in soup.find_all("a", class_="g1-frame", title=True, href=True):
                 title = a["title"].strip()
                 if normalized in _normalize(title):
-                    us.append(a["href"]); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                    href = a["href"]
+                    urls.append(href); titles.append(title)
+                    found += 1
+            nxt = soup.find("a", class_="g1-load-more", attrs={"data-g1-next-page-url": True})
+            if not nxt or found == 0:
+                break
+            page += 1
     return urls, titles
 
 async def fetch_nsfw247(search_term: str) -> Tuple[List[str], List[str]]:
     query = search_term.replace(" ", "-")
     normalized = _normalize(search_term)
     base = f"https://nsfw247.to/search/{query}-0z5g7jn9"
-    urls, titles = [], []
-    page = 1
-    page_urls = []
+    urls, titles, page = [], [], 1
     async with aiohttp.ClientSession() as session:
         while True:
             url = base if page == 1 else f"{base}/page/{page}/"
+            print(f"[nsfw247] {url}")
             async with session.get(url) as r:
                 html = await r.text()
             soup = BeautifulSoup(html, "html.parser")
-            found = any(
-                a["href"].startswith("https://nsfw247.to/")
-                and normalized in _normalize(a.get_text(strip=True))
-                for a in soup.find_all("a", href=True)
-            )
-            if not found:
-                break
-            page_urls.append(url)
-            page += 1
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                html2 = await r2.text()
-            soup2 = BeautifulSoup(html2, "html.parser")
-            for a in soup2.find_all("a", href=True):
+            found = 0
+            for a in soup.find_all("a", href=True):
                 href = a["href"]
-                if href.startswith("https://nsfw247.to/"):
-                    title = a.get_text(strip=True)
-                    if normalized in _normalize(title):
-                        us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                if not href.startswith("https://nsfw247.to/"):
+                    continue
+                title = a.get_text(strip=True)
+                if normalized in _normalize(title):
+                    urls.append(href); titles.append(title); found += 1
+            if found == 0:
+                break
+            page += 1
     return urls, titles
 
 async def fetch_hornysimp(search_term: str) -> Tuple[List[str], List[str]]:
     query = search_term.replace(" ", "+")
     normalized = _normalize(search_term)
-    base1 = f"https://hornysimp.com/?s={query}"
-    base_n = f"https://hornysimp.com/?s={query}/?_page={{p}}"
-    urls, titles = [], []
-    page = 1
-    page_urls = []
+    urls, titles, page = [], [], 1
     async with aiohttp.ClientSession() as session:
         while True:
-            url = base1 if page == 1 else base_n.format(p=page)
+            url = (
+                f"https://hornysimp.com/?s={query}"
+                if page == 1
+                else f"https://hornysimp.com/?s={query}/?_page={page}"
+            )
+            print(f"[hornysimp] {url}")
             async with session.get(url) as r:
                 html = await r.text()
             soup = BeautifulSoup(html, "html.parser")
-            found = any(
-                "hornysimp.com" in a.get("href", "")
-                and normalized in _normalize(a.get("title", "").strip())
-                for a in soup.find_all("a", href=True, title=True)
-            )
-            if not found:
-                break
-            page_urls.append(url)
-            page += 1
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                html2 = await r2.text()
-            soup2 = BeautifulSoup(html2, "html.parser")
-            for a in soup2.find_all("a", href=True, title=True):
+            found = 0
+            for a in soup.find_all("a", href=True, title=True):
                 href = a["href"]; title = a["title"].strip()
                 if "hornysimp.com" in href and normalized in _normalize(title):
-                    us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                    urls.append(href); titles.append(title); found += 1
+            if found == 0:
+                break
+            page += 1
     return urls, titles
 
 async def fetch_porntn(search_term: str) -> Tuple[List[str], List[str]]:
@@ -586,12 +490,17 @@ async def fetch_porntn(search_term: str) -> Tuple[List[str], List[str]]:
     base = f"https://porntn.com/search/{query}"
     normalized = _normalize(search_term)
     urls, titles = [], []
-    page_urls = []
     async with aiohttp.ClientSession() as session:
-        page_urls.append(base)
+        # first page
+        print(f"[porntn] GET {base}")
         async with session.get(base) as r:
             html = await r.text()
         soup = BeautifulSoup(html, "html.parser")
+        for a in soup.find_all("a", href=True, title=True):
+            href, title = a["href"], a["title"].strip()
+            if href.startswith("https://porntn.com/videos") and normalized in _normalize(title):
+                urls.append(href); titles.append(title)
+        # offsets
         offsets = []
         for a in soup.find_all("a", href="#videos", attrs={"data-parameters": True}):
             for part in a["data-parameters"].split(";"):
@@ -600,20 +509,18 @@ async def fetch_porntn(search_term: str) -> Tuple[List[str], List[str]]:
                     if off.isdigit():
                         offsets.append(off)
         for off in offsets:
-            page_urls.append(f"{base}/?from={off}")
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                html2 = await r2.text()
+            page_url = f"{base}/?from={off}"
+            print(f"[porntn] GET {page_url}")
+            async with session.get(page_url) as r:
+                html2 = await r.text()
             soup2 = BeautifulSoup(html2, "html.parser")
+            found = 0
             for a in soup2.find_all("a", href=True, title=True):
                 href, title = a["href"], a["title"].strip()
                 if href.startswith("https://porntn.com/videos") and normalized in _normalize(title):
-                    us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                    urls.append(href); titles.append(title); found += 1
+            if found == 0:
+                break
     return urls, titles
 
 async def fetch_xxbrits(search_term: str) -> Tuple[List[str], List[str]]:
@@ -621,97 +528,79 @@ async def fetch_xxbrits(search_term: str) -> Tuple[List[str], List[str]]:
     base = f"https://www.xxbrits.com/search/{query}-23cd7b/"
     normalized = _normalize(search_term)
     urls, titles = [], []
-    page_urls = []
     async with aiohttp.ClientSession() as session:
-        page_urls.append(base)
+        print(f"[xxbrits] GET {base}")
         async with session.get(base) as r:
             html = await r.text()
         soup = BeautifulSoup(html, "html.parser")
+        for a in soup.find_all("a", class_="item link-post", href=True, title=True):
+            title, href = a["title"].strip(), a["href"]
+            if normalized in _normalize(title):
+                urls.append(href); titles.append(title)
         offsets = []
         for a in soup.find_all("a", href="#search", attrs={"data-parameters": True}):
             for part in a["data-parameters"].split(";"):
                 if ":" in part:
-                    _, v = part.split(":", 1)
+                    k, v = part.split(":", 1)
                     if v.isdigit():
                         offsets.append(v)
         for off in offsets:
-            page_urls.append(f"{base}?from={off}")
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                html2 = await r2.text()
+            page_url = f"{base}?from={off}"
+            print(f"[xxbrits] GET {page_url}")
+            async with session.get(page_url) as r:
+                html2 = await r.text()
             soup2 = BeautifulSoup(html2, "html.parser")
+            found = 0
             for a in soup2.find_all("a", class_="item link-post", href=True, title=True):
                 title, href = a["title"].strip(), a["href"]
                 if normalized in _normalize(title):
-                    us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                    urls.append(href); titles.append(title); found += 1
+            if found == 0:
+                break
     return urls, titles
 
 async def fetch_bitchesgirls(search_term: str) -> Tuple[List[str], List[str]]:
     query = search_term.replace(" ", "%20")
     normalized = _normalize(search_term)
-    base = f"https://bitchesgirls.com/search/{query}/"
-    urls, titles = [], []
-    page = 1
-    page_urls = []
+    urls, titles, page = [], [], 1
     async with aiohttp.ClientSession() as session:
         while True:
-            url = f"{base}{page}/"
+            url = f"https://bitchesgirls.com/search/{query}/{page}/"
+            print(f"[bitchesgirls] {url}")
             async with session.get(url) as r:
                 html = await r.text()
             soup = BeautifulSoup(html, "html.parser")
-            found = any(
-                a.get("href", "").startswith("/onlyfans/") and normalized in _normalize(a.get_text(strip=True))
-                for a in soup.find_all("a", href=True)
-            )
-            if not found:
-                break
-            page_urls.append(url)
-            page += 1
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                html2 = await r2.text()
-            soup2 = BeautifulSoup(html2, "html.parser")
-            for a in soup2.find_all("a", href=True):
+            found = 0
+            for a in soup.find_all("a", href=True):
                 href = a["href"]; text = a.get_text(strip=True)
                 if href.startswith("/onlyfans/") and normalized in _normalize(text):
-                    us.append(f"https://bitchesgirls.com{href}"); ts.append(text)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                    full = f"https://bitchesgirls.com{href}"
+                    urls.append(full); titles.append(text); found += 1
+            if found == 0:
+                break
+            page += 1
     return urls, titles
 
 async def fetch_thotslife(term: str) -> Tuple[List[str], List[str]]:
     urls, titles, seen = [], [], set()
     next_url = f"https://thotslife.com/?s={term}"
-    page_urls = []
     async with aiohttp.ClientSession() as session:
         while next_url:
-            page_urls.append(next_url)
+            print(f"[thotslife] {next_url}")
             async with session.get(next_url) as r:
                 text = await r.text()
             soup = BeautifulSoup(text, "html.parser")
-            load_more = soup.find("a", class_="g1-button g1-load-more", attrs={"data-g1-next-page-url": True})
-            next_url = load_more["data-g1-next-page-url"] if load_more else None
-        async def _fetch_page(u: str):
-            us, ts = [], []
-            async with session.get(u) as r2:
-                text2 = await r2.text()
-            soup2 = BeautifulSoup(text2, "html.parser")
-            for a in soup2.find_all("a", class_="g1-frame"):
+            items = soup.find_all("a", class_="g1-frame")
+            found = False
+            for a in items:
                 href = a.get("href"); title = a.get("title") or a.text.strip()
-                if href not in seen:
-                    seen.add(href); us.append(href); ts.append(title)
-            return us, ts
-        tasks = [asyncio.create_task(_fetch_page(u)) for u in page_urls]
-        for us, ts in await asyncio.gather(*tasks):
-            urls.extend(us); titles.extend(ts)
+                if href in seen:
+                    continue
+                seen.add(href); urls.append(href); titles.append(title); found = True
+            load_more = soup.find("a", class_="g1-button g1-load-more", attrs={"data-g1-next-page-url": True})
+            if not load_more or not found:
+                break
+            next_url = load_more["data-g1-next-page-url"]
     return urls, titles
 
 # ---- API endpoints for existing scrapers ----
