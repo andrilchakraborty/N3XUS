@@ -44,12 +44,21 @@ templates = Jinja2Templates(directory="templates")
 async def read_index(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
-# ---- Helper functions ----
-def parse_links_and_titles(page_content: str, pattern: str, title_class: str):
-    soup = BeautifulSoup(page_content, "html.parser")
-    links = [a["href"] for a in soup.find_all("a", href=True) if re.match(pattern, a["href"])]
-    titles = [span.get_text() for span in soup.find_all("span", class_=title_class)]
-    return links, titles
+def parse_links_and_titles(page_content, pattern, title_class):
+    soup = BeautifulSoup(page_content, 'html.parser')
+    links = [
+        a['href'] for a in soup.find_all('a', href=True)
+        if re.match(pattern, a['href'])
+    ]
+    filtered_links = [link for link in links if link not in IGNORED_LINKS]
+    titles = [
+        span.get_text() for span in soup.find_all('span', class_=title_class)
+    ]
+
+    print(f"DEBUG: Parsed Links - {filtered_links}")
+    print(f"DEBUG: Extracted Titles - {titles}")
+
+    return filtered_links, titles
 
 async def get_webpage_content(url: str, session: aiohttp.ClientSession):
     async with session.get(url, allow_redirects=True) as response:
@@ -59,12 +68,12 @@ async def get_webpage_content(url: str, session: aiohttp.ClientSession):
 # ---- Existing scrapers: Erome, Bunkr, Fapello, JPG5 ----
 
 def extract_album_links(page_content: str) -> List[str]:
-    soup = BeautifulSoup(page_content, "html.parser")
-    links = set()
-    for a in soup.find_all("a", class_="album-link"):
-        href = a.get("href")
-        if href and href.startswith("https://www.erome.com/a/"):
-            links.add(href)
+    soup  = BeautifulSoup(page_content, "html.parser")
+    links = {
+        a["href"]
+        for a in soup.find_all("a", class_="album-link")
+        if a.get("href", "").startswith("https://www.erome.com/a/")
+    }
     return list(links)
 
 async def fetch_all_album_pages(username: str, max_pages: int = 10) -> List[str]:
@@ -75,8 +84,7 @@ async def fetch_all_album_pages(username: str, max_pages: int = 10) -> List[str]
             text, _, status = await get_webpage_content(search_url, session)
             if status != 200 or not text:
                 break
-            for link in extract_album_links(text):
-                all_links.add(link)
+            all_links.update(extract_album_links(text))
     return list(all_links)
 
 async def fetch_image_urls(album_url: str, session: aiohttp.ClientSession) -> List[str]:
@@ -85,47 +93,76 @@ async def fetch_image_urls(album_url: str, session: aiohttp.ClientSession) -> Li
     return [
         urljoin(base_url, img["data-src"])
         for img in soup.find_all("div", class_="img")
-        if img.get("data-src")
+        if img.get("data-src") and "/thumb/" not in img["data-src"]
     ]
 
-async def fetch_all_erome_image_urls(album_urls: List[str]) -> List[str]:
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
-        tasks = [fetch_image_urls(url, session) for url in album_urls]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-    urls = {u for res in results if isinstance(res, list) for u in res if "/thumb/" not in u}
-    return list(urls)
+# ——— NEW ———
+async def fetch_video_urls(album_url: str, session: aiohttp.ClientSession) -> List[str]:
+    page_content, base_url, _ = await get_webpage_content(album_url, session)
+    soup = BeautifulSoup(page_content, "html.parser")
+    return [
+        urljoin(base_url, source["src"].split("?")[0])
+        for source in soup.find_all("source", type="video/mp4")
+        if source.get("src")
+    ]
 
-async def get_album_links_from_search(username: str, page: int = 1):
+
+
+async def fetch_all_erome_media(album_urls: List[str]) -> List[str]:
+    async with aiohttp.ClientSession(headers=HEADERS) as session:
+        tasks = [
+            asyncio.gather(
+                fetch_image_urls(url, session),
+                fetch_video_urls(url, session),
+                return_exceptions=True
+            )
+            for url in album_urls
+        ]
+        results = await asyncio.gather(*tasks)
+    # flatten and dedupe
+    media = {
+        media_url
+        for res in results
+        if isinstance(res, (tuple, list))
+        for media_url in (*res[0], *res[1])
+    }
+    return list(media)
+
+IGNORED_LINKS = [
+    "https://bunkr-albums.io/", "https://bunkr-albums.io/topvideos",
+    "https://bunkr-albums.io/topalbums", "https://bunkr-albums.io/topfiles",
+    "https://bunkr-albums.io/topimages"
+]
+
+async def get_all_album_links_from_search(username: str, page: int = 1):
     search_url = f"https://bunkr-albums.io/?search={urllib.parse.quote(username)}&page={page}"
+    print(f"DEBUG: Bunkr search page {page} URL → {search_url}")
     async with aiohttp.ClientSession() as session:
         async with session.get(search_url) as resp:
+            print(f"DEBUG: GET {search_url} → status {resp.status}")
             if resp.status != 200:
                 return []
             text = await resp.text()
-    links, titles = parse_links_and_titles(text, r"^https://bunkr\.cr/a/.*", "album-title")
+
+    links, titles = parse_links_and_titles(
+        text,
+        r"^https://bunkr\.cr/a/.*",
+        "album-title"
+    )
+    print(f"DEBUG: Found {len(links)} links and {len(titles)} titles on page {page}")
+
+    # If titles list is shorter (or empty), pad with empty strings
+    if len(titles) < len(links):
+        titles += [""] * (len(links) - len(titles))
+
+    # Now zip will include *all* links
     return [{"url": u, "title": t} for u, t in zip(links, titles)]
 
-async def get_all_album_links_from_search(username: str):
-    albums, page = [], 1
-    while True:
-        page_albums = await get_album_links_from_search(username, page)
-        if not page_albums:
-            break
-        albums.extend(page_albums)
-        # detect next page
-        text, _, _ = await get_webpage_content(
-            f"https://bunkr-albums.io/?search={urllib.parse.quote(username)}&page={page}",
-            aiohttp.ClientSession(),
-        )
-        soup = BeautifulSoup(text, "html.parser")
-        nxt = soup.find("a", href=re.compile(rf"\?search={re.escape(username)}&page={page+1}"), class_="btn btn-sm btn-main")
-        if not nxt:
-            break
-        page += 1
-    return albums
 
 async def get_image_links_from_album(album_url: str, session: aiohttp.ClientSession):
+    print(f"DEBUG: Fetching Bunkr album page → {album_url}")
     async with session.get(album_url) as resp:
+        print(f"DEBUG: GET {album_url} → status {resp.status}")
         if resp.status != 200:
             return []
         text = await resp.text()
@@ -133,79 +170,197 @@ async def get_image_links_from_album(album_url: str, session: aiohttp.ClientSess
     out = []
     for a in soup.find_all("a", attrs={"aria-label": "download"}, href=True):
         href = a["href"]
-        if href.startswith("/f/"):
-            out.append("https://bunkr.cr" + href)
-        elif href.startswith("https://bunkr.cr/f/"):
-            out.append(href)
+        full = "https://bunkr.cr" + href if href.startswith("/f/") else href
+        out.append(full)
+    print(f"DEBUG: Found {len(out)} raw download links in album")
     return out
 
-async def get_image_url_from_link(link: str, session: aiohttp.ClientSession):
-    async with session.get(link) as resp:
-        if resp.status != 200:
+async def get_image_url_from_link(link: str, session: aiohttp.ClientSession) -> str:
+    print(f"[DEBUG] Opening image page link: {link}")
+    try:
+        async with session.get(link) as response:
+            if response.status != 200:
+                print(f"[DEBUG] Received {response.status} for link: {link}. Skipping.")
+                return None
+            text = await response.text()
+    except Exception as e:
+        print(f"[DEBUG] Error fetching image page {link}: {e}")
+        return None
+
+    soup = BeautifulSoup(text, 'html.parser')
+    img_tag = soup.find('img', class_=lambda x: x and "object-cover" in x)
+    if img_tag:
+        image_url = img_tag.get('src')
+        print(f"[DEBUG] Found image URL: {image_url} for page link: {link}")
+        try:
+            async with session.head(image_url) as head_response:
+                if head_response.status != 200:
+                    print(f"[DEBUG] HEAD request for image URL {image_url} returned status {head_response.status}. Skipping.")
+                    return None
+        except Exception as e:
+            print(f"[DEBUG] Error during HEAD check for image URL {image_url}: {e}. Skipping.")
             return None
-        text = await resp.text()
-    soup = BeautifulSoup(text, "html.parser")
-    img = soup.find("img", class_=lambda c: c and "object-cover" in c)
-    return img.get("src") if img else None
+        return image_url
+
+    print(f"[DEBUG] No image tag found on page: {link}")
+    return None
+
+IGNORED_LINKS = [
+    "https://bunkr-albums.io/", "https://bunkr-albums.io/topvideos",
+    "https://bunkr-albums.io/topalbums", "https://bunkr-albums.io/topfiles",
+    "https://bunkr-albums.io/topimages"
+]
+
+async def get_all_album_links_from_search(username: str, page: int = 1):
+    search_url = f"https://bunkr-albums.io/?search={urllib.parse.quote(username)}&page={page}"
+    print(f"DEBUG: Bunkr search page {page} URL → {search_url}")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(search_url) as resp:
+            print(f"DEBUG: GET {search_url} → status {resp.status}")
+            if resp.status != 200:
+                return []
+            text = await resp.text()
+
+    links, titles = parse_links_and_titles(
+        text,
+        r"^https://bunkr\.cr/a/.*",
+        "album-title"
+    )
+    print(f"DEBUG: Found {len(links)} links and {len(titles)} titles on page {page}")
+
+    # If titles list is shorter (or empty), pad with empty strings
+    if len(titles) < len(links):
+        titles += [""] * (len(links) - len(titles))
+
+    # Return the links, even if titles are missing
+    return [{"url": u, "title": t} for u, t in zip(links, titles)]
+
+async def fetch_bunkr_gallery_images(username: str) -> List[str]:
+    print(f"DEBUG: Starting Bunkr gallery fetch for '{username}'")
+    async with aiohttp.ClientSession() as session:
+        albums = await get_all_album_links_from_search(username)
+        print(f"DEBUG: Got {len(albums)} album(s) to scan for images")
+        tasks = []
+        for alb in albums:
+            album_url = alb["url"]
+            # Skip the ignored links
+            if album_url in IGNORED_LINKS:
+                print(f"DEBUG: Skipping ignored link: {album_url}")
+                continue
+
+            print(f"DEBUG: Fetching image links for album: {album_url}")
+            album_links = await get_image_links_from_album(album_url, session)
+            print(f"DEBUG: Found {len(album_links)} image page links in album")
+            for link in album_links:
+                tasks.append(get_image_url_from_link(link, session))
+        
+        # Gather all image URLs
+        results = await asyncio.gather(*tasks)
+        valid = [u for u in results if u]  # Filter out None values
+
+        # Validate the URLs to check if they are still accessible
+        validated = await asyncio.gather(*(validate_url(u, session) for u in valid))
+        final_urls = list({u for u in validated if u})
+
+        print(f"DEBUG: {len(final_urls)} image URLs validated successfully")
+        return final_urls
 
 async def validate_url(url: str, session: aiohttp.ClientSession):
     try:
+        print(f"DEBUG: Validating URL → {url}")
         async with session.get(url, headers={"Range": "bytes=0-0"}, allow_redirects=True) as r:
-            if r.status == 200:
+            print(f"DEBUG: HEAD-like GET {url} → status {r.status}")
+            if r.status == 206:
                 return url
-    except:
-        pass
+    except Exception as e:
+        print(f"DEBUG: Error validating {url}: {e}")
     return None
 
 thumb_pattern = re.compile(r"/thumb/")
 
-async def fetch_bunkr_gallery_images(username: str) -> List[str]:
-    async with aiohttp.ClientSession() as session:
-        albums = await get_all_album_links_from_search(username)
-        tasks = []
-        for alb in albums:
-            for link in await get_image_links_from_album(alb["url"], session):
-                tasks.append(get_image_url_from_link(link, session))
-        results = await asyncio.gather(*tasks)
-        valid = [u for u in results if u and not thumb_pattern.search(u)]
-        validated = await asyncio.gather(*(validate_url(u, session) for u in valid))
-        return list({u for u in validated if u})
-
 async def fetch_fapello_page_media(page_url: str, session: aiohttp.ClientSession, username: str) -> dict:
+    print(f"[DEBUG] Entering fetch_fapello_page_media: page_url={page_url}, username={username}")
     try:
         content, base, status = await get_webpage_content(page_url, session)
+        print(f"[DEBUG] get_webpage_content returned status={status}, base={base}, content_length={len(content) if content else 0}")
         if status != 200:
+            print(f"[DEBUG] Non-200 status for {page_url}, returning empty media")
             return {"images": [], "videos": []}
+
         soup = BeautifulSoup(content, "html.parser")
-        imgs = [img.get("src") or img.get("data-src")
-                for img in soup.find_all("img")
-                if img.get("src", "").startswith(f"https://fapello.com/content/") and f"/{username}/" in img.get("src", "")]
-        vids = [v["src"] for v in soup.find_all("source", type="video/mp4", src=True)
-                if f"/{username}/" in v["src"]]
-        return {"images": list(set(imgs)), "videos": list(set(vids))}
-    except:
+
+        raw_imgs = soup.find_all("img")
+        imgs = []
+        for img in raw_imgs:
+            src = img.get("src") or img.get("data-src")
+            if not src:
+                continue
+            if src.startswith("https://fapello.com/content/") and f"/{username}/" in src:
+                imgs.append(src)
+        print(f"[DEBUG] Found {len(imgs)} raw image URLs on page")
+
+        raw_vids = soup.find_all("source", type="video/mp4", src=True)
+        vids = []
+        for v in raw_vids:
+            src = v["src"]
+            if f"/{username}/" in src:
+                vids.append(src)
+        print(f"[DEBUG] Found {len(vids)} raw video URLs on page")
+
+        unique_imgs = list(set(imgs))
+        unique_vids = list(set(vids))
+        print(f"[DEBUG] Deduplicated to {len(unique_imgs)} images and {len(unique_vids)} videos")
+
+        return {"images": unique_imgs, "videos": unique_vids}
+
+    except Exception as e:
+        print(f"[ERROR] Exception in fetch_fapello_page_media for {page_url}: {e}")
         return {"images": [], "videos": []}
 
+
 async def fetch_fapello_album_media(album_url: str) -> dict:
+    print(f"[DEBUG] Entering fetch_fapello_album_media: album_url={album_url}")
     media = {"images": [], "videos": []}
+
     parsed = urllib.parse.urlparse(album_url)
     username = parsed.path.strip("/").split("/")[0]
+    print(f"[DEBUG] Parsed username={username} from URL")
+
     async with aiohttp.ClientSession(headers={**HEADERS, "Referer": album_url}) as session:
         content, base, status = await get_webpage_content(album_url, session)
+        print(f"[DEBUG] get_webpage_content for album returned status={status}, base={base}, content_length={len(content) if content else 0}")
         if status != 200:
+            print(f"[DEBUG] Non-200 status for album {album_url}, returning empty media")
             return media
+
         soup = BeautifulSoup(content, "html.parser")
-        pages = {urllib.parse.urljoin(base, a["href"])
-                 for a in soup.find_all("a", href=True)
-                 if urllib.parse.urljoin(base, a["href"]).startswith(album_url) and re.search(r"/\d+/?$", a["href"])}
+        anchors = soup.find_all("a", href=True)
+        pages = {
+            urllib.parse.urljoin(base, a["href"])
+            for a in anchors
+            if urllib.parse.urljoin(base, a["href"]).startswith(album_url)
+               and re.search(r"/\d+/?$", a["href"])
+        }
+        print(f"[DEBUG] Discovered {len(pages)} page URLs in album")
+
         if not pages:
             pages = {album_url}
+            print(f"[DEBUG] No numbered pages found, defaulting to album_url only")
+
         tasks = [fetch_fapello_page_media(p, session, username) for p in pages]
-        for res in await asyncio.gather(*tasks):
-            media["images"].extend(res["images"])
-            media["videos"].extend(res["videos"])
+        print(f"[DEBUG] Scheduling {len(tasks)} page-media fetch tasks")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for idx, res in enumerate(results):
+            if isinstance(res, Exception):
+                print(f"[ERROR] Task {idx} raised exception: {res}")
+                continue
+            media["images"].extend(res.get("images", []))
+            media["videos"].extend(res.get("videos", []))
+
     media["images"] = list(set(media["images"]))
     media["videos"] = list(set(media["videos"]))
+    print(f"[DEBUG] Final aggregated media count: {len(media['images'])} images, {len(media['videos'])} videos")
     return media
 
 async def extract_jpg5_album_media_urls(album_url: str) -> List[str]:
@@ -672,18 +827,33 @@ async def get_erome_albums(username: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+import traceback
+from fastapi import HTTPException
+
 @app.get("/api/erome-gallery")
 async def get_erome_gallery(query: str):
     try:
-        async with aiohttp.ClientSession(headers=HEADERS) as session:
-            if query.startswith("http"):
-                imgs = await fetch_image_urls(query, session)
-            else:
-                albums = await fetch_all_album_pages(query)
-                imgs = await fetch_all_erome_image_urls(albums)
-        return {"images": imgs}
+        print(f"DEBUG: received query = {query!r}")
+
+        # build album list
+        if query.startswith("http"):
+            albums = [query]
+        else:
+            albums = await fetch_all_album_pages(query)
+        print(f"DEBUG: fetched album links = {albums}")
+
+        # fetch media
+        media = await fetch_all_erome_media(albums)
+        print(f"DEBUG: fetched media count = {len(media)}")
+
+        return {"images": media}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # full traceback to the console/log
+        traceback.print_exc()
+        # include the message so the client sees something more descriptive
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+
 
 # Bunkr Albums: use `query` param to match front-end
 @app.get("/api/bunkr-albums")
@@ -698,27 +868,31 @@ async def get_bunkr_albums(query: str):
 @app.get("/api/bunkr-gallery")
 async def get_bunkr_gallery(query: str):
     try:
-        async with aiohttp.ClientSession() as session:
-            if query.startswith("http"):
-                pages = await get_image_links_from_album(query, session)
-                tasks = [get_image_url_from_link(u, session) for u in pages]
-                res = await asyncio.gather(*tasks)
-                imgs = [u for u in res if u and not thumb_pattern.search(u)]
-            else:
-                imgs = await fetch_bunkr_gallery_images(query)
-        return {"images": imgs}
+        images = await fetch_bunkr_gallery_images(query)
+        return {"images": images}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        print(f"[DEBUG] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing Bunkr gallery: {e}")
 # Fapello Gallery: no changes needed, but ensure it's registered
 @app.get("/api/fapello-gallery")
 async def get_fapello_gallery(album_url: str):
+    print(f"[DEBUG] get_fapello_gallery called with album_url={album_url}")
+    # If the caller passed just a username, build the full URL
+    if not album_url.startswith("http"):
+        original = album_url
+        album_url = f"https://fapello.com/{album_url}"
+        print(f"[DEBUG] Converted username '{original}' to full URL: {album_url}")
+
     if "fapello.com" not in album_url:
+        print(f"[ERROR] Invalid album URL: {album_url}")
         raise HTTPException(status_code=400, detail="Invalid album URL")
+
     try:
         m = await fetch_fapello_album_media(album_url)
+        print(f"[DEBUG] Returning {len(m['images'])} images and {len(m['videos'])} videos for {album_url}")
         return {"images": m["images"], "videos": m["videos"]}
     except Exception as e:
+        print(f"[ERROR] Exception in get_fapello_gallery: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/jpg5-gallery")
