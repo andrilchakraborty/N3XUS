@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
-from typing import List, Tuple
+from typing import List, Union, Dict, Tuple
 
 # ---- Global constants ----
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -65,10 +65,23 @@ async def get_webpage_content(url: str, session: aiohttp.ClientSession):
         text = await response.text()
         return text, str(response.url), response.status
 
-# ---- Existing scrapers: Erome, Bunkr, Fapello, JPG5 ----
+VIDEO_THUMB = (
+    "https://media.discordapp.net/attachments/"
+    "1343576085098664020/1364464992593772644/raw.png"
+    "?ex=680bbecc&is=680a6d4c&hm=f5b308c94c60411147c99b5672fb4230791da9c202cce9a2cd5285ebbaa95a02"
+    "&=&format=webp&quality=lossless&width=882&height=882"
+)
+
+async def get_webpage_content(url: str, session: aiohttp.ClientSession):
+    """
+    Returns (text, base_url, status_code).
+    """
+    async with session.get(url) as resp:
+        text = await resp.text()
+        return text, str(resp.url), resp.status
 
 def extract_album_links(page_content: str) -> List[str]:
-    soup  = BeautifulSoup(page_content, "html.parser")
+    soup = BeautifulSoup(page_content, "html.parser")
     links = {
         a["href"]
         for a in soup.find_all("a", class_="album-link")
@@ -80,7 +93,10 @@ async def fetch_all_album_pages(username: str, max_pages: int = 10) -> List[str]
     all_links = set()
     async with aiohttp.ClientSession() as session:
         for page in range(1, max_pages + 1):
-            search_url = f"https://www.erome.com/search?q={urllib.parse.quote(username)}&page={page}"
+            search_url = (
+                f"https://www.erome.com/search?q="
+                f"{urllib.parse.quote(username)}&page={page}"
+            )
             text, _, status = await get_webpage_content(search_url, session)
             if status != 200 or not text:
                 break
@@ -96,37 +112,77 @@ async def fetch_image_urls(album_url: str, session: aiohttp.ClientSession) -> Li
         if img.get("data-src") and "/thumb/" not in img["data-src"]
     ]
 
-# ——— NEW ———
-async def fetch_video_urls(album_url: str, session: aiohttp.ClientSession) -> List[str]:
+# ——— UPDATED ———
+async def fetch_video_urls(album_url: str, session: aiohttp.ClientSession) -> List[Dict[str, str]]:
+    """
+    Returns a list of {"url": <video_url>, "thumbnail": <thumbnail_url>}.
+    Tries to extract the <video poster="..."> attribute; falls back to VIDEO_THUMB.
+    """
     page_content, base_url, _ = await get_webpage_content(album_url, session)
     soup = BeautifulSoup(page_content, "html.parser")
-    return [
-        urljoin(base_url, source["src"].split("?")[0])
-        for source in soup.find_all("source", type="video/mp4")
-        if source.get("src")
-    ]
 
+    videos = []
+    # Look for <video> tags (with optional poster attr) and their <source> children
+    for video_tag in soup.find_all("video"):
+        # Determine thumbnail: use poster attr if present, else fallback
+        poster_attr = video_tag.get("poster")
+        if poster_attr:
+            # Make poster absolute URL if needed
+            thumbnail_url = urljoin(base_url, poster_attr)
+        else:
+            thumbnail_url = VIDEO_THUMB
 
+        # Find the first MP4 <source> inside this <video>
+        source = video_tag.find("source", {"type": "video/mp4", "src": True})
+        if not source:
+            continue
 
-async def fetch_all_erome_media(album_urls: List[str]) -> List[str]:
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
+        raw_src = source["src"].split("?", 1)[0]
+        full_url = urljoin(base_url, raw_src)
+
+        videos.append({
+            "url": full_url,
+            "thumbnail": thumbnail_url
+        })
+
+    return videos
+
+async def fetch_all_erome_media(
+    album_urls: List[str]
+) -> List[Union[str, Dict[str, str]]]:
+    """
+    Fetches both image URLs (as plain strings) and video dicts
+    from all Erome albums; returns a de-duplicated, ordered list.
+    """
+    async with aiohttp.ClientSession() as session:
+        # For each album, gather image & video fetches in parallel
         tasks = [
             asyncio.gather(
                 fetch_image_urls(url, session),
                 fetch_video_urls(url, session),
-                return_exceptions=True
+                return_exceptions=False
             )
             for url in album_urls
         ]
         results = await asyncio.gather(*tasks)
-    # flatten and dedupe
-    media = {
-        media_url
-        for res in results
-        if isinstance(res, (tuple, list))
-        for media_url in (*res[0], *res[1])
-    }
-    return list(media)
+
+    # Flatten into one list
+    all_items: List[Union[str, Dict[str, str]]] = []
+    for imgs, vids in results:
+        all_items.extend(imgs)
+        all_items.extend(vids)
+
+    # Dedupe by URL, preserving first-seen order
+    seen_urls = set()
+    unique_media: List[Union[str, Dict[str, str]]] = []
+    for item in all_items:
+        url = item["url"] if isinstance(item, dict) else item
+        if url not in seen_urls:
+            seen_urls.add(url)
+            unique_media.append(item)
+
+    return unique_media
+
 
 IGNORED_LINKS = [
     "https://bunkr-albums.io/", "https://bunkr-albums.io/topvideos",
