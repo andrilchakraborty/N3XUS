@@ -535,14 +535,18 @@
         e.preventDefault(); return false;
       }
     });
-    // Detect devtools and reload
-    const threshold=160;
-    setInterval(()=>{
-      if(window.outerWidth-window.innerWidth>threshold||
-         window.outerHeight-window.innerHeight>threshold){
-        location.reload();
-      }
-    },1000);
+    // Detect devtools and reload (desktop only)
+    if (!/Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+      const threshold = 160;
+      setInterval(() => {
+        if (
+          window.outerWidth - window.innerWidth > threshold ||
+          window.outerHeight - window.innerHeight > threshold
+        ) {
+          location.reload();
+        }
+      }, 1000);
+    }
 
     // Preloader
     window.addEventListener('load',()=>{
@@ -563,14 +567,12 @@
     let adminMode=false;
   
     // Community Servers
-    // Community Servers
     const servers=[
       { name:'Exiled NSFW',        description:'Join our Discord community only if u not a snowflake.', url:'https://discord.gg/exiled',        icon:'https://media.discordapp.net/attachments/1274042631755796481/1365442988871913493/a_c5ed72320e7c8bd846e511c8ce6cbcc4.gif?ex=680d5361&is=680c01e1&hm=0feeb7770d0f4a6c35b10e9aefac2df99a961fbe5e59ce901950da7c29824fef&=' },
       { name:'Sinners',description:'Discord server for nsfw leaks.',           url:'https://discord.gg/sinners',        icon:'https://media.discordapp.net/attachments/1343576085098664020/1364832623326924821/Sinners.jpg?ex=680d152e&is=680bc3ae&hm=87f7490788ce7163c74033b3550e19158097fa3a94cb88e5a23947fb0d9beea6&=&format=webp' },
       { name:'Goon Cave',       description:'Discord server for NSFW leaks find almost any leaks for ur fav model.',                url:'https://discord.gg/y6EdJBAvF9',   icon:'https://media.discordapp.net/attachments/1341633831773667368/1363999969907834970/raw.png?ex=680cb0b6&is=680b5f36&hm=c25a0bf169776a6eec15ba148cd9461df0208ca7c242da059eb86b93137d1efe&=&format=webp&quality=lossless&width=350&height=350' },
       { name:'Crows',        description:'Chill chat.',                              url:'https://discord.gg/drQkVnZRYe',    icon:'https://media.discordapp.net/attachments/1051449361327980574/1365446118376476732/Crows_e-girls_Nitro__Social__Giveaways__Voicechat-1.gif?ex=680d564b&is=680c04cb&hm=95446b0bf898eef13b967dd1e3d1a758b56a57c9b0f8f06d1a3730475d91cd0c&=' }
     ];
-
 
     // API endpoints
     const endpoints=[
