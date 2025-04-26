@@ -1,73 +1,98 @@
 import os
-import asyncio
-import aiohttp
 import re
 import json
-import urllib.parse
+import asyncio
+import aiohttp
 import uvicorn
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import List, Union, Dict, Tuple
 from urllib.parse import urljoin
+
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from starlette.middleware.base import BaseHTTPMiddleware
-from typing import List, Union, Dict, Tuple
-from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
-# ---- Global constants ----
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-SERVERS_FILE = "servers.json"
-MODELS_FILE = "models.json"
+# ─── Persistent Data Directory Setup ───────────────────────────────────────────
+# Use RAILWAY_PERSISTENT_PATH or fallback to /data
+DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# ---- FastAPI setup ----
+USERS_FILE   = DATA_DIR / "users.json"
+SERVERS_FILE = DATA_DIR / "servers.json"
+MODELS_FILE  = DATA_DIR / "models.json"
+
+# ─── Templates Directory ─────────────────────────────────────────────────────
+BASE_DIR   = Path(__file__).parent
+templates  = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+# ─── Utility to load/save JSON ─────────────────────────────────────────────────
+def save_json(path: Path, data):
+    path.write_text(json.dumps(data, indent=2))
+
+def load_json(path: Path, default):
+    if not path.exists():
+        save_json(path, default)
+    return json.loads(path.read_text())
+
+# ─── FastAPI & Middleware ─────────────────────────────────────────────────────
 app = FastAPI()
-total_visits = 0
-active_connections = set()
 
 class StatsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        global total_visits
-        total_visits += 1
-        return await call_next(request)
+        # You can add your stats logic here
+        response = await call_next(request)
+        return response
 
 app.add_middleware(StatsMiddleware)
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"]
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-templates = Jinja2Templates(directory="templates")
 
-# ---- Auth config ----
+# ─── Auth Configuration ───────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "change_this_to_a_random_secret")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
-USERS_FILE = "users.json"
-
-def load_json(path, default):
-    if not os.path.exists(path):
-        with open(path, "w") as f:
-            json.dump(default, f)
-    with open(path, "r") as f:
-        return json.load(f)
-
-def save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
-    to_encode.update({"exp": datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))})
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def verify_password(plain, hashed): return pwd_context.verify(plain, hashed)
-def get_password_hash(pw): return pwd_context.hash(pw)
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
 
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if not username:
+            raise JWTError()
+    except JWTError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid authentication credentials")
+    users = load_json(USERS_FILE, {})
+    if username not in users:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    return username
+
+# ─── Pydantic Models ─────────────────────────────────────────────────────────
 class UserIn(BaseModel):
     username: str
     password: str
@@ -76,46 +101,40 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        if not username: raise
-    except:
-        raise HTTPException(401, "Invalid authentication credentials")
-    users = load_json(USERS_FILE, {})
-    if username not in users:
-        raise HTTPException(401, "User not found")
-    return username
+class ServerIn(BaseModel):
+    name: str
+    description: str
+    url: str
+    icon: str
 
-# ---- On-disk “DB” helpers for servers & models ----
-def load_servers(): return load_json(SERVERS_FILE, [])
-def save_servers(s): save_json(SERVERS_FILE, s)
-def load_models(): return load_json(MODELS_FILE, [])
-def save_models(m): save_json(MODELS_FILE, m)
+class ModelIn(BaseModel):
+    name: str
+    endpoints: List[dict]
 
-# ---- Root endpoint ----
+# ─── “Database” Helpers ───────────────────────────────────────────────────────
+def load_servers() -> List[dict]:
+    return load_json(SERVERS_FILE, [])
+
+def save_servers(servers: List[dict]):
+    save_json(SERVERS_FILE, servers)
+
+def load_models() -> List[dict]:
+    return load_json(MODELS_FILE, [])
+
+def save_models(models: List[dict]):
+    save_json(MODELS_FILE, models)
+
+# ─── Routes ───────────────────────────────────────────────────────────────────
 @app.get("/")
-async def read_index(request: Request):
+async def root(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
-# allow your frontend’s origin (or '*' for public)
-origins = ["*"]  # or ["https://your-railway-domain.up.railway.app"]
-
-app.add_middleware(
-  CORSMiddleware,
-  allow_origins=origins,
-  allow_credentials=True,
-  allow_methods=["*"],      # GET, POST, OPTIONS, etc.
-  allow_headers=["*"],      # Content-Type, Authorization, etc.
-)
-
-# ---- Auth endpoints ----
+# ---- Auth Endpoints ----
 @app.post("/api/register", status_code=201)
 async def register(user: UserIn):
     users = load_json(USERS_FILE, {})
     if user.username in users:
-        raise HTTPException(400, "Username already registered")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Username already registered")
     users[user.username] = get_password_hash(user.password)
     save_json(USERS_FILE, users)
     return {"msg": "Registered"}
@@ -125,49 +144,45 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     users = load_json(USERS_FILE, {})
     hashed = users.get(form_data.username)
     if not hashed or not verify_password(form_data.password, hashed):
-        raise HTTPException(401, "Incorrect username or password", headers={"WWW-Authenticate":"Bearer"})
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
     token = create_access_token({"sub": form_data.username})
     return {"access_token": token, "token_type": "bearer"}
 
-# ---- Global Servers API ----
+# ---- Servers Endpoints (public) ----
 @app.get("/api/servers")
-async def get_servers(current_user: str = Depends(get_current_user)):
+async def get_servers():
     return load_servers()
 
-class ServerIn(BaseModel):
-    name: str
-    description: str
-    url: str
-    icon: str
-
 @app.post("/api/servers", status_code=201)
-async def add_server(srv: ServerIn, current_user: str = Depends(get_current_user)):
+async def add_server(srv: ServerIn):
     servers = load_servers()
     servers.append(srv.dict())
     save_servers(servers)
-    return {"msg":"Server added"}
+    return {"msg": "Server added"}
 
-class ModelIn(BaseModel):
-    name: str
-    endpoints: List[dict]
-
-# 1) Public GET – no auth required here
+# ---- Models Endpoints ----
 @app.get("/api/models", response_model=List[ModelIn])
-async def get_models_public():
+async def get_models():
     return load_models()
 
-# 2) (Optional) If you still want only authenticated users to add new models,
-#    leave the Depends(get_current_user) here. Otherwise, remove it to make POST public too.
 @app.post("/api/models", status_code=201)
-async def add_model(
-    m: ModelIn,
-    current_user: str = Depends(get_current_user)    # ← remove this line to make POST public
-):
+async def add_model(m: ModelIn, current_user: str = Depends(get_current_user)):
     models = load_models()
     models.append(m.dict())
     save_models(models)
-    return {"msg":"Model added"}
+    return {"msg": "Model added"}
 
+@app.delete("/api/models/{model_name}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_model(model_name: str, current_user: str = Depends(get_current_user)):
+    models = load_models()
+    remaining = [m for m in models if m.get("name") != model_name]
+    if len(remaining) == len(models):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Model not found")
+    save_models(remaining)
 
 def parse_links_and_titles(page_content, pattern, title_class):
     soup = BeautifulSoup(page_content, 'html.parser')
