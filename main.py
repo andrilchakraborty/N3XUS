@@ -7,7 +7,7 @@ import aiohttp
 import uvicorn
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Union, Dict, Tuple
 from fastapi import FastAPI, HTTPException, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
