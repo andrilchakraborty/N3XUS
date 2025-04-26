@@ -219,7 +219,7 @@
       animation: slideDown 1s ease-out;
     }
     #intro p {
-      color:var(--text-muted); line-height:1.5; max-width:600px; margin:0 auto;
+      color:var(--text-muted); line-height:1.5; max-width:600px; width:auto; margin:0 auto;
     }
     @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
     @keyframes slideDown { from { transform:translateY(-20px); opacity:0; } to { transform:translateY(0); opacity:1; } }
@@ -466,6 +466,7 @@
     }
     #admin-panel h3 { margin-bottom:12px; color:var(--accent); }
     #admin-panel input { width:100%; padding:6px 10px; margin-bottom:8px; border:none; border-radius:4px; background:#1a1a1f; color:var(--text-light); }
+    #admin-panel hr { border-color:var(--accent); margin:12px 0; }
   </style>
 </head>
 <body>
@@ -618,20 +619,22 @@
     <input id="new-server-url" placeholder="Invite URL" />
     <input id="new-server-icon" placeholder="Thumbnail URL" />
     <button id="add-server-btn">Add Server Card</button>
-    <hr style="border-color:var(--accent);margin:12px 0;">
+    <hr>
+    <input id="delete-server-title" placeholder="Server Title to Delete" />
+    <button id="delete-server-btn">Delete Server</button>
+    <hr>
     <input id="new-model-name" type="text" placeholder="Model Name" />
     <input id="new-model-zip" type="file" accept=".zip" />
     <button id="upload-btn">Upload Model</button>
     <input id="tab-icon-url" type="text" placeholder="Tab Icon URL" />
     <button id="tab-icon-btn">Set Tab Icon</button>
-    <hr style="border-color:var(--accent);margin:12px 0;">
-    <!-- Delete a model by name (in case it isn’t visible in the JSON list) -->
+    <hr>
     <input id="delete-model-name" type="text" placeholder="Model Name to Delete" />
     <button id="delete-model-btn">Delete Model</button>
   </div>
 
   <script>
-    const DEFAULT_THUMB = 'https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png?ex=680d104c&is=680bbecc&hm=788bc73c49593be5a6e0495d7a99419dde66ba77f6b66601bcb58d65d60ce267&=&format=webp&quality=lossless&width=882&height=882';
+    const DEFAULT_THUMB = 'https://media.discordapp.net/attachments/1343576085098664020/1364464992593772644/raw.png?ex=680d5361&is=680c01e1&hm=0feeb7770d0f4a6c35b10e9aefac2df99a961fbe5e59ce901950da7c29824fef&=';
 
     // API helper
     async function API(path, opts={}) {
@@ -686,12 +689,10 @@
         authModal.style.display = 'none';
         initApp();
       } else {
-        // after successful registration, switch to login
         authToggle.click();
       }
     };
 
-    // On load
     window.addEventListener('DOMContentLoaded', async ()=>{
       const token = localStorage.getItem('n3xus_token');
       if (!token) {
@@ -701,6 +702,7 @@
         initApp();
       }
     });
+
     // All endpoints…
     const endpoints = [
       { name:'Erome Gallery',   url:q=>`/api/erome-gallery?query=${q}`,       type:'gallery' },
@@ -724,6 +726,7 @@
       { name:'Fapello Gallery', url:q=>`/api/fapello-gallery?album_url=${q}`,type:'gallery' },
       { name:'JPG5 Gallery',    url:q=>`/api/jpg5-gallery?album_url=${q}`,    type:'gallery' }
     ];
+
     // DOM refs
     const serversGrid = document.getElementById('servers-grid'),
           searchForm  = document.getElementById('search-form'),
@@ -765,7 +768,6 @@
     let servers = [], results = [];
 
     async function initApp(){
-      // hide auth modal just in case
       authModal.style.display = 'none';
 
       // Preloader
@@ -1180,6 +1182,24 @@
       }catch(e){ console.error(e); alert('Error processing ZIP.'); }
     }
     document.getElementById('new-model-zip').addEventListener('change', uploadNewModel);
+
+    // Delete Server
+    document.getElementById('delete-server-btn').onclick = async () => {
+      const title = document.getElementById('delete-server-title').value.trim();
+      if (!title) return alert('Enter a server title to delete.');
+      const res = await API(`/api/servers/${encodeURIComponent(title)}`, { method: 'DELETE' });
+      if (res.status === 204) {
+        servers = servers.filter(s => s.name !== title);
+        renderServers();
+        alert(`Server “${title}” deleted.`);
+      } else if (res.status === 404) {
+        alert(`Server “${title}” not found.`);
+      } else {
+        const text = await res.text();
+        alert(`Failed to delete server: ${text}`);
+      }
+    };
+
     // Delete Model
     document.getElementById('delete-model-btn').onclick = async () => {
       const name = document.getElementById('delete-model-name').value.trim();
@@ -1188,7 +1208,6 @@
         method: 'DELETE'
       });
       if (res.status === 204) {
-        // Update front-end state
         results = results.filter(m => m.name !== name);
         localStorage.setItem('n3xus_results', JSON.stringify(results));
         renderModels(results);
