@@ -1,8 +1,8 @@
 import os
-import sqlite3
 import asyncio
 import aiohttp
 import re
+import json
 import urllib.parse
 import uvicorn
 from urllib.parse import urljoin
@@ -18,53 +18,30 @@ from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
+# ---- Global constants ----
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+SERVERS_FILE = "servers.json"
+MODELS_FILE = "models.json"
+
 # ---- FastAPI setup ----
 app = FastAPI()
+total_visits = 0
+active_connections = set()
+
+class StatsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        global total_visits
+        total_visits += 1
+        return await call_next(request)
+
+app.add_middleware(StatsMiddleware)
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"]
 )
 templates = Jinja2Templates(directory="templates")
 
-# ---- SQLite “DB” helpers ----
-
-DB_PATH = "data.db"
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-@app.on_event("startup")
-def init_sqlite():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # servers table
-    c.execute("""
-      CREATE TABLE IF NOT EXISTS servers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        description TEXT NOT NULL,
-        url TEXT NOT NULL,
-        icon TEXT NOT NULL
-      )
-    """)
-    # models table
-    c.execute("""
-      CREATE TABLE IF NOT EXISTS models (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        endpoints_json TEXT NOT NULL
-      )
-    """)
-    conn.commit()
-    conn.close()
-
-# ---- Auth config, same as before ----
+# ---- Auth config ----
 SECRET_KEY = os.getenv("SECRET_KEY", "change_this_to_a_random_secret")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
@@ -73,12 +50,12 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 USERS_FILE = "users.json"
 
 def load_json(path, default):
-    # you can keep your existing JSON user store or migrate to SQL as well
     if not os.path.exists(path):
         with open(path, "w") as f:
             json.dump(default, f)
     with open(path, "r") as f:
         return json.load(f)
+
 def save_json(path, data):
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
@@ -111,7 +88,29 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise HTTPException(401, "User not found")
     return username
 
-# ---- Auth endpoints (same) ----
+# ---- On-disk “DB” helpers for servers & models ----
+def load_servers(): return load_json(SERVERS_FILE, [])
+def save_servers(s): save_json(SERVERS_FILE, s)
+def load_models(): return load_json(MODELS_FILE, [])
+def save_models(m): save_json(MODELS_FILE, m)
+
+# ---- Root endpoint ----
+@app.get("/")
+async def read_index(request: Request):
+    return templates.TemplateResponse("ok.html", {"request": request})
+
+# allow your frontend’s origin (or '*' for public)
+origins = ["*"]  # or ["https://your-railway-domain.up.railway.app"]
+
+app.add_middleware(
+  CORSMiddleware,
+  allow_origins=origins,
+  allow_credentials=True,
+  allow_methods=["*"],      # GET, POST, OPTIONS, etc.
+  allow_headers=["*"],      # Content-Type, Authorization, etc.
+)
+
+# ---- Auth endpoints ----
 @app.post("/api/register", status_code=201)
 async def register(user: UserIn):
     users = load_json(USERS_FILE, {})
@@ -130,56 +129,43 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     token = create_access_token({"sub": form_data.username})
     return {"access_token": token, "token_type": "bearer"}
 
-# ---- Servers API using SQLite ----
+# ---- Global Servers API ----
+@app.get("/api/servers")
+async def get_servers(current_user: str = Depends(get_current_user)):
+    return load_servers()
+
 class ServerIn(BaseModel):
     name: str
     description: str
     url: str
     icon: str
 
-@app.get("/api/servers", response_model=List[ServerIn])
-async def get_servers(db: sqlite3.Connection = Depends(get_db),
-                      current_user: str = Depends(get_current_user)):
-    cur = db.execute("SELECT name, description, url, icon FROM servers")
-    rows = cur.fetchall()
-    return [dict(row) for row in rows]
-
 @app.post("/api/servers", status_code=201)
-async def add_server(srv: ServerIn,
-                     db: sqlite3.Connection = Depends(get_db),
-                     current_user: str = Depends(get_current_user)):
-    db.execute(
-      "INSERT INTO servers(name,description,url,icon) VALUES (?,?,?,?)",
-      (srv.name, srv.description, srv.url, srv.icon)
-    )
-    db.commit()
+async def add_server(srv: ServerIn, current_user: str = Depends(get_current_user)):
+    servers = load_servers()
+    servers.append(srv.dict())
+    save_servers(servers)
     return {"msg":"Server added"}
 
-# ---- Models API using SQLite ----
 class ModelIn(BaseModel):
     name: str
     endpoints: List[dict]
 
+# 1) Public GET – no auth required here
 @app.get("/api/models", response_model=List[ModelIn])
-async def get_models_public(db: sqlite3.Connection = Depends(get_db)):
-    cur = db.execute("SELECT name, endpoints_json FROM models")
-    out = []
-    for row in cur.fetchall():
-        out.append({
-            "name": row["name"],
-            "endpoints": json.loads(row["endpoints_json"])
-        })
-    return out
+async def get_models_public():
+    return load_models()
 
+# 2) (Optional) If you still want only authenticated users to add new models,
+#    leave the Depends(get_current_user) here. Otherwise, remove it to make POST public too.
 @app.post("/api/models", status_code=201)
-async def add_model(m: ModelIn,
-                    db: sqlite3.Connection = Depends(get_db),
-                    current_user: str = Depends(get_current_user)):
-    db.execute(
-      "INSERT INTO models(name,endpoints_json) VALUES (?,?)",
-      (m.name, json.dumps(m.endpoints))
-    )
-    db.commit()
+async def add_model(
+    m: ModelIn,
+    current_user: str = Depends(get_current_user)    # ← remove this line to make POST public
+):
+    models = load_models()
+    models.append(m.dict())
+    save_models(models)
     return {"msg":"Model added"}
 
 
