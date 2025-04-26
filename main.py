@@ -4,21 +4,31 @@ import json
 import asyncio
 import aiohttp
 import uvicorn
-import secrets
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Union, Dict, Tuple
 from urllib.parse import urljoin
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Body, status
+from fastapi import Depends
+from bs4 import BeautifulSoup
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
+from aiohttp import ClientSession
+from urllib.parse import quote_plus, urlencode
+import urllib.parse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from starlette.middleware.base import BaseHTTPMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
-from bs4 import BeautifulSoup
+from urllib.parse import quote, urljoin
 
+# add a desktop‑style UA so fullporner doesn’t block us:
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/114.0.0.0 Safari/537.36"
+}
 # ─── Path setup ───────────────────────────────────────────────────────────────
 BASE_DIR      = Path(__file__).parent
 USERS_FILE    = BASE_DIR / "users.json"
@@ -128,13 +138,14 @@ def save_models(models: List[dict]):
 async def root(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
-# ---- Invite Codes Endpoints (no auth required) ----
+# ---- Invite Codes Endpoints ----
 @app.post("/api/invite-code", status_code=201)
-async def generate_invite_code():
+async def generate_invite_code(current_user: str = Depends(get_current_user)):
     """
-    Generate a new invite code (public).
+    Generate a new invite code (admin only).
     """
     invites = load_json(INVITES_FILE, {})
+    # create a URL-safe token of length ~12
     code = secrets.token_urlsafe(8)
     invites[code] = False    # False == unused
     save_json(INVITES_FILE, invites)
@@ -146,15 +157,18 @@ async def register(data: RegisterIn):
     """
     Register a new user *only* if they supply a valid, unused invite code.
     """
+    # load and validate invite
     invites = load_json(INVITES_FILE, {})
     if data.invite_code not in invites:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid invite code")
     if invites[data.invite_code] is True:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invite code already used")
 
+    # mark invite used
     invites[data.invite_code] = True
     save_json(INVITES_FILE, invites)
 
+    # now create user
     users = load_json(USERS_FILE, {})
     if data.username in users:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Username already registered")
@@ -191,6 +205,7 @@ async def add_server(srv: ServerIn):
 @app.delete("/api/servers/{server_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_server(
     server_name: str,
+    current_user: str = Depends(get_current_user)
 ):
     servers   = load_servers()
     remaining = [s for s in servers if s["name"] != server_name]
@@ -217,10 +232,236 @@ async def delete_model(model_name: str, current_user: str = Depends(get_current_
     remaining = [m for m in models if m.get("name") != model_name]
     if len(remaining) == len(models):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
-    save_json(MODELS_FILE, remaining)
+    save_models(remaining)
     return
 
+# ─── FullPorner: single‐page fetch + detect last page ────────────────────────
+async def fetch_fullporner_page(session: ClientSession, term: str, page: int):
+    url = f"https://fullporner.com/search?q={quote_plus(term)}&p={page}"
+    print(f"[DEBUG] fetch_fullporner_page: GET {url}")
+    async with session.get(url, headers=HEADERS) as resp:
+        print(f"[DEBUG] fetch_fullporner_page: response status={resp.status} for page {page}")
+        text = await resp.text()
 
+    soup = BeautifulSoup(text, "html.parser")
+
+    # normalize by removing everything except a–z0–9
+    normalized_term = re.sub(r'[^a-z0-9]', '', term.lower())
+    print(f"[DEBUG] fetch_fullporner_page: normalized_term='{normalized_term}'")
+
+    videos = []
+    for a in soup.find_all("a", class_="popout", href=True):
+        href = a["href"]
+        title = a.get_text(strip=True)
+        norm_title = re.sub(r'[^a-z0-9]', '', title.lower())
+
+        # skip non‐video links
+        if href in ("/", "/pornstars", "/category"):
+            print(f"[DEBUG] skipping non-video href={href}")
+            continue
+
+        # check if normalized_term is _anywhere_ in normalized title
+        if normalized_term not in norm_title:
+            print(f"[DEBUG] skipping because '{normalized_term}' not in '{norm_title}' (from '{title}')")
+            continue
+
+        full_url = f"https://fullporner.com{href}"
+        print(f"[DEBUG] found video '{title}' -> {full_url}")
+        videos.append((full_url, title))
+
+    print(f"[DEBUG] fetch_fullporner_page: page {page} collected {len(videos)} videos")
+
+    # detect last page number on first page
+    last_page = None
+    if page == 1:
+        nums = [
+            int(p.get_text()) for p in soup.find_all("a", class_="page-link", href=True)
+            if p.get_text().isdigit()
+        ]
+        if nums:
+            last_page = max(nums)
+            print(f"[DEBUG] detected last_page = {last_page}")
+
+    return videos, last_page
+
+# ─── FullPorner: aggregate across all pages ─────────────────────────────────
+async def fetch_fullporner(term: str):
+    print(f"[DEBUG] fetch_fullporner: starting for term '{term}'")
+    async with aiohttp.ClientSession() as session:
+        first_videos, last_page = await fetch_fullporner_page(session, term, 1)
+        print(f"[DEBUG] first page returned {len(first_videos)} videos, last_page={last_page}")
+        if not first_videos:
+            print(f"[DEBUG] no videos on first page, aborting")
+            return [], []
+
+        all_videos = list(first_videos)
+        if last_page and last_page > 1:
+            print(f"[DEBUG] scheduling pages 2…{last_page}")
+            tasks = [fetch_fullporner_page(session, term, p) for p in range(2, last_page + 1)]
+            results = await asyncio.gather(*tasks)
+            for idx, (vids, _) in enumerate(results, start=2):
+                print(f"[DEBUG] page {idx} returned {len(vids)} videos")
+                if not vids:
+                    print(f"[DEBUG] stopping at page {idx} (no vids)")
+                    break
+                all_videos.extend(vids)
+
+        print(f"[DEBUG] total videos fetched = {len(all_videos)}")
+        urls, titles = zip(*all_videos) if all_videos else ([], [])
+        return list(urls), list(titles)
+
+@app.get("/api/fullporner-videos")
+async def get_fullporner_videos(query: str):
+    """
+    Scrape all video URLs and titles for a search term from FullPorner (with pagination).
+    * query: the search term (e.g. pornstar name)
+    """
+    print(f"[DEBUG] get_fullporner_videos: received query='{query}'")
+    try:
+        urls, titles = await fetch_fullporner(query)
+        print(f"[DEBUG] returning {len(urls)} urls")
+        return {"urls": urls, "titles": titles}
+    except Exception as e:
+        print(f"[ERROR] get_fullporner_videos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ─── HQPorner: breadth‐first crawl up to max_pages/max_results ───────────────
+async def scrape_hqporner(name: str, max_pages: int = 5, max_results: int = 100, debug: bool = False):
+    print(f"[DEBUG] scrape_hqporner: start name='{name}', max_pages={max_pages}, max_results={max_results}")
+    base = "https://hqporner.com"
+    q = urlencode({'q': name})
+    queue = [f"{base}/?{q}"]
+    seen_urls = set()
+    results_urls = []
+    results_titles = []
+    normalized_name = "".join(name.lower().split())
+
+    async with ClientSession(headers=HEADERS) as session:
+        for page_idx in range(max_pages):
+            if not queue:
+                print(f"[DEBUG] scrape_hqporner: queue empty at iteration {page_idx}, breaking")
+                break
+            if len(results_urls) >= max_results:
+                print(f"[DEBUG] scrape_hqporner: reached max_results={max_results}, breaking")
+                break
+
+            url = queue.pop(0)
+            print(f"[DEBUG] scrape_hqporner: fetching page #{page_idx+1} -> {url}")
+            async with session.get(url) as resp:
+                print(f"[DEBUG] scrape_hqporner: response status={resp.status}")
+                html = await resp.text()
+            soup = BeautifulSoup(html, 'html.parser')
+
+            # stop if "no results" on first page
+            if page_idx == 0 and soup.find(text=re.compile(r"Sorry, I can'?t find porn to your request", re.IGNORECASE)):
+                print("[DEBUG] scrape_hqporner: no results on first page, aborting")
+                return [], []
+
+            found = 0
+            for a in soup.select('a.click-trigger'):
+                href = a.get('href', '')
+                title = a.get_text(strip=True)
+                if not href.startswith('/hdporn/'):
+                    continue
+                full_url = base + href
+                norm_title = "".join(title.lower().split())
+                if normalized_name in norm_title and full_url not in seen_urls:
+                    seen_urls.add(full_url)
+                    results_urls.append(full_url)
+                    results_titles.append(title)
+                    found += 1
+                    print(f"[DEBUG] scrape_hqporner: found video '{title}' -> {full_url}")
+                    if len(results_urls) >= max_results:
+                        print(f"[DEBUG] scrape_hqporner: hit max_results limit")
+                        break
+
+            print(f"[DEBUG] scrape_hqporner: page #{page_idx+1} found {found} new videos")
+            if page_idx == 0 and found == 0:
+                print("[DEBUG] scrape_hqporner: no matches on first page, aborting")
+                return [], []
+            if found == 0:
+                print(f"[DEBUG] scrape_hqporner: no new videos on page #{page_idx+1}, stopping")
+                break
+
+            # queue next page if available
+            next_btn = soup.select_one('a.pagi-btn[href*="p="]')
+            if next_btn:
+                next_href = next_btn['href']
+                full_next = base + next_href if next_href.startswith('/') else next_href
+                if full_next not in queue:
+                    queue.append(full_next)
+                    print(f"[DEBUG] scrape_hqporner: queued next page -> {full_next}")
+
+    print(f"[DEBUG] scrape_hqporner: total videos found = {len(results_urls)}")
+    return results_urls, results_titles
+
+@app.get("/api/hqporner-videos")
+async def get_hqporner_videos(
+    query: str,
+    max_pages: int = 5,
+    max_results: int = 100,
+    debug: bool = False
+):
+    """
+    Scrape video URLs and titles from HQPorner.
+    * query: search term
+    * max_pages: how many pages of search results to crawl (default 5)
+    * max_results: cap on total videos returned (default 100)
+    * debug: if true, prints debug logs
+    """
+    print(f"[DEBUG] get_hqporner_videos: received query='{query}', max_pages={max_pages}, max_results={max_results}, debug={debug}")
+    try:
+        urls, titles = await scrape_hqporner(query, max_pages, max_results, debug)
+        print(f"[DEBUG] get_hqporner_videos: returning {len(urls)} urls")
+        return {"urls": urls, "titles": titles}
+    except Exception as e:
+        print(f"[ERROR] get_hqporner_videos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+# ——— PornXP fetch with pagination ———
+async def fetch_pornxp(search_term: str):
+    """Scrape all video URLs and titles for a pornstar tag from PornXP, across pagination."""
+    tag = quote(search_term)
+    page = 1
+    all_urls, all_titles = [], []
+
+    while True:
+        url = f"https://pornxp.com/tags/{tag}" + (f"?page={page}" if page > 1 else "")
+        print(f"[DEBUG] Fetching PornXP page {page}: {url}")
+        async with aiohttp.ClientSession(headers=HEADERS) as session:
+            async with session.get(url) as resp:
+                print(f"[DEBUG] Received response: status={resp.status} for page {page}")
+                text = await resp.text()
+        soup = BeautifulSoup(text, "html.parser")
+
+        # find video links on this page
+        links = soup.find_all("a", href=re.compile(r"^/videos/\d+"))
+        if not links:
+            print(f"[DEBUG] No video links found on page {page}, stopping pagination")
+            break
+
+        print(f"[DEBUG] Found {len(links)} video links on page {page}")
+        for a in links:
+            href = a.get("href")
+            full_url = urljoin("https://pornxp.com", href)
+            parent = a.parent
+            title_div = parent.find("div", class_="item_title")
+            title = title_div.get_text(strip=True) if title_div else "No title"
+            print(f"[DEBUG] Page {page} video: {full_url}, title: '{title}'")
+            all_urls.append(full_url)
+            all_titles.append(title)
+
+        # check if there is a next page link by finding pagination anchor with ?page=N+1
+        next_link = soup.find("a", href=re.compile(rf"/tags/{tag}\?page={page+1}"))
+        if next_link:
+            print(f"[DEBUG] Next page {page+1} exists, continuing")
+            page += 1
+            await asyncio.sleep(0.1)  # polite crawl
+        else:
+            print(f"[DEBUG] No next page link found after page {page}, ending pagination")
+            break
+
+    print(f"[DEBUG] Total PornXP videos scraped: {len(all_urls)}")
+    return all_urls, all_titles
 
 def parse_links_and_titles(page_content, pattern, title_class):
     soup = BeautifulSoup(page_content, 'html.parser')
@@ -1087,7 +1328,18 @@ async def get_erome_gallery(query: str):
         traceback.print_exc()
         # include the message so the client sees something more descriptive
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
-
+# ─── FastAPI endpoint ────────────────────────────────────────────────────────
+@app.get("/api/pornxp-videos")
+async def get_pornxp_videos(query: str):
+    """
+    Scrape all video URLs and titles for a pornstar tag from PornXP (with pagination).
+    * query: the pornstar tag to search for
+    """
+    try:
+        urls, titles = await fetch_pornxp(query)
+        return {"urls": urls, "titles": titles}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Bunkr Albums: use `query` param to match front-end
 @app.get("/api/bunkr-albums")
