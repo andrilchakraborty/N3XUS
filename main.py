@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Union, Dict, Tuple
 from urllib.parse import urljoin
-
+from fastapi import Depends
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,34 +19,29 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
-# ─── Persistent Data Directory Setup ───────────────────────────────────────────
-# Use RAILWAY_PERSISTENT_PATH or fallback to /data
-DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-USERS_FILE   = DATA_DIR / "users.json"
-SERVERS_FILE = DATA_DIR / "servers.json"
-MODELS_FILE  = DATA_DIR / "models.json"
+# ─── Path setup ───────────────────────────────────────────────────────────────
+BASE_DIR     = Path(__file__).parent
+USERS_FILE   = BASE_DIR / "users.json"
+SERVERS_FILE = BASE_DIR / "servers.json"
+MODELS_FILE  = BASE_DIR / "models.json"
 
-# ─── Templates Directory ─────────────────────────────────────────────────────
-BASE_DIR   = Path(__file__).parent
-templates  = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+# ─── Utility to load/save JSON ────────────────────────────────────────────────
+def load_json(path: Path, default):
+    if not path.exists():
+        path.write_text(json.dumps(default, indent=2))
+    return json.loads(path.read_text())
 
-# ─── Utility to load/save JSON ─────────────────────────────────────────────────
 def save_json(path: Path, data):
     path.write_text(json.dumps(data, indent=2))
 
-def load_json(path: Path, default):
-    if not path.exists():
-        save_json(path, default)
-    return json.loads(path.read_text())
-
 # ─── FastAPI & Middleware ─────────────────────────────────────────────────────
 app = FastAPI()
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+# Simple visit counter middleware
 class StatsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # You can add your stats logic here
         response = await call_next(request)
         return response
 
@@ -157,6 +152,17 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 async def get_servers():
     return load_servers()
 
+@app.delete("/api/servers/{server_name}", status_code=204)
+async def delete_server(
+    server_name: str,
+):
+    servers = load_servers()
+    remaining = [s for s in servers if s["name"] != server_name]
+    if len(remaining) == len(servers):
+        raise HTTPException(status_code=404, detail="Server not found")
+    save_servers(remaining)
+    return
+    
 @app.post("/api/servers", status_code=201)
 async def add_server(srv: ServerIn):
     servers = load_servers()
@@ -183,6 +189,8 @@ async def delete_model(model_name: str, current_user: str = Depends(get_current_
     if len(remaining) == len(models):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Model not found")
     save_models(remaining)
+    return
+
 
 def parse_links_and_titles(page_content, pattern, title_class):
     soup = BeautifulSoup(page_content, 'html.parser')
