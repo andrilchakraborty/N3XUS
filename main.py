@@ -3,6 +3,7 @@ import asyncio
 import aiohttp
 import re
 import json
+from fastapi import status
 import urllib.parse
 import uvicorn
 from urllib.parse import urljoin
@@ -150,6 +151,19 @@ async def add_server(srv: ServerIn, current_user: str = Depends(get_current_user
 class ModelIn(BaseModel):
     name: str
     endpoints: List[dict]
+
+@app.delete("/api/models/{model_name}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_model(model_name: str, current_user: str = Depends(get_current_user)):
+    """
+    Remove any model whose name exactly matches `model_name`.
+    """
+    models = load_models()
+    # filter out the one to delete
+    remaining = [m for m in models if m.get("name") != model_name]
+    if len(remaining) == len(models):
+        raise HTTPException(status_code=404, detail="Model not found")
+    save_models(remaining)
+    return
 
 # 1) Public GET – no auth required here
 @app.get("/api/models", response_model=List[ModelIn])
