@@ -476,6 +476,7 @@
       <h2 id="auth-title">Login</h2>
       <input id="auth-username" placeholder="Username" required/>
       <input id="auth-password" type="password" placeholder="Password" required/>
+      <input id="auth-invite-code" placeholder="Invite Code" style="display:none;" />
       <button type="submit" id="auth-submit">Login</button>
       <div id="auth-toggle">No account? Register</div>
       <div id="auth-error"></div>
@@ -650,7 +651,8 @@
           authTitle   = document.getElementById('auth-title'),
           authToggle  = document.getElementById('auth-toggle'),
           authSubmit  = document.getElementById('auth-submit'),
-          authError   = document.getElementById('auth-error');
+          authError   = document.getElementById('auth-error'),
+          authInvite  = document.getElementById('auth-invite-code');
     let isLogin = true;
 
     authToggle.onclick = () => {
@@ -659,6 +661,13 @@
       authSubmit.textContent  = isLogin ? 'Login' : 'Register';
       authToggle.textContent  = isLogin ? 'No account? Register' : 'Have an account? Login';
       authError.textContent   = '';
+      if (isLogin) {
+        authInvite.style.display = 'none';
+        authInvite.required = false;
+      } else {
+        authInvite.style.display = 'block';
+        authInvite.required = true;
+      }
     };
 
     authForm.onsubmit = async e => {
@@ -676,7 +685,11 @@
         : {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({username:u,password:p})
+            body: JSON.stringify({
+              username: u,
+              password: p,
+              invite_code: document.getElementById('auth-invite-code').value.trim()
+            })
           };
       const res = await fetch(url, opts);
       if (!res.ok) {
@@ -689,6 +702,7 @@
         authModal.style.display = 'none';
         initApp();
       } else {
+        // after successful registration, flip back to login
         authToggle.click();
       }
     };
