@@ -355,6 +355,22 @@
       height: 100px;
       object-fit: cover;
     }
+    .model-card .delete-btn {
+      display: none;
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(230,0,126,0.8);
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      padding: 4px 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .admin-mode .model-card .delete-btn {
+      display: block;
+    }
 
     /* Gallery subview */
     #gallery-view { display:none; padding:20px 40px; overflow:auto; }
@@ -608,6 +624,10 @@
     <button id="upload-btn">Upload Model</button>
     <input id="tab-icon-url" type="text" placeholder="Tab Icon URL" />
     <button id="tab-icon-btn">Set Tab Icon</button>
+    <hr style="border-color:var(--accent);margin:12px 0;">
+    <!-- Delete a model by name (in case it isn’t visible in the JSON list) -->
+    <input id="delete-model-name" type="text" placeholder="Model Name to Delete" />
+    <button id="delete-model-btn">Delete Model</button>
   </div>
 
   <script>
@@ -681,7 +701,29 @@
         initApp();
       }
     });
-
+    // All endpoints…
+    const endpoints = [
+      { name:'Erome Gallery',   url:q=>`/api/erome-gallery?query=${q}`,       type:'gallery' },
+      { name:'Erome Albums',    url:q=>`/api/erome-albums?username=${q}`,     type:'albums'  },
+      { name:'Bunkr Gallery',   url:q=>`/api/bunkr-gallery?query=${q}`,       type:'gallery' },
+      { name:'Bunkr Albums',    url:q=>`/api/bunkr-albums?query=${q}`,        type:'albums'  },
+      { name:'NotFans',         url:q=>`/api/notfans?search_term=${q}`,       type:'urls',   key:['urls','titles'] },
+      { name:'Influencers',     url:q=>`/api/influencers?term=${q}`,          type:'urls',   key:['urls','titles'] },
+      { name:'Thothub',         url:q=>`/api/thothub?term=${q}`,              type:'urls',   key:['urls','titles'] },
+      { name:'DirtyShip',       url:q=>`/api/dirtyship?term=${q}`,            type:'urls',   key:['urls','titles'] },
+      { name:'PimpBunny',       url:q=>`/api/pimpbunny?term=${q}`,            type:'urls',   key:['urls','titles'] },
+      { name:'LeakedZone',      url:q=>`/api/leakedzone?term=${q}`,           type:'urls',   key:['urls','titles'] },
+      { name:'FanslyLeaked',    url:q=>`/api/fanslyleaked?term=${q}`,         type:'urls',   key:['urls','titles'] },
+      { name:'GotAnyNudes',     url:q=>`/api/gotanynudes?term=${q}`,          type:'urls',   key:['urls','titles'] },
+      { name:'NSFW247',         url:q=>`/api/nsfw247?term=${q}`,             type:'urls',   key:['urls','titles'] },
+      { name:'HornySimp',       url:q=>`/api/hornysimp?term=${q}`,           type:'urls',   key:['urls','titles'] },
+      { name:'Porntn',          url:q=>`/api/porntn?term=${q}`,              type:'urls',   key:['urls','titles'] },
+      { name:'xxBrits',         url:q=>`/api/xxbrits?term=${q}`,             type:'urls',   key:['urls','titles'] },
+      { name:'BitchesGirls',    url:q=>`/api/bitchesgirls?term=${q}`,        type:'urls',   key:['urls','titles'] },
+      { name:'ThotsLife',       url:q=>`/api/thotslife?term=${q}`,           type:'urls',   key:['urls','titles'] },
+      { name:'Fapello Gallery', url:q=>`/api/fapello-gallery?album_url=${q}`,type:'gallery' },
+      { name:'JPG5 Gallery',    url:q=>`/api/jpg5-gallery?album_url=${q}`,    type:'gallery' }
+    ];
     // DOM refs
     const serversGrid = document.getElementById('servers-grid'),
           searchForm  = document.getElementById('search-form'),
@@ -906,24 +948,45 @@
     function renderModels(list){
       modelsGrid.innerHTML='';
       list.forEach(m=>{
-        const erome=m.endpoints.find(e=>e.name==='Erome Gallery');
-        const bunkr=m.endpoints.find(e=>e.name==='Bunkr Gallery');
-        let thumbHtml='';
-        if(erome){
-          let u=erome.items[0].url||erome.items[0];
-          thumbHtml+=`<img src="${u}" class="thumb-half" />`;
+        const erome = m.endpoints.find(e=>e.name==='Erome Gallery');
+        const bunkr = m.endpoints.find(e=>e.name==='Bunkr Gallery');
+        let thumbHtml = '';
+        if (erome){
+          let u = erome.items[0].url||erome.items[0];
+          thumbHtml += `<img src="${u}" class="thumb-half" />`;
         }
-        if(bunkr){
-          let u=bunkr.items[0].url||bunkr.items[0];
-          thumbHtml+=`<img src="${u}" class="thumb-half" />`;
+        if (bunkr){
+          let u = bunkr.items[0].url||bunkr.items[0];
+          thumbHtml += `<img src="${u}" class="thumb-half" />`;
         }
-        if(!thumbHtml) thumbHtml=`<img src="${DEFAULT_THUMB}" />`;
-        const card=document.createElement('div');
-        card.className=thumbHtml.includes('thumb-half')?'model-card dual-thumb':'model-card';
-        card.innerHTML=`
+        if (!thumbHtml) thumbHtml = `<img src="${DEFAULT_THUMB}" />`;
+        const card = document.createElement('div');
+        card.className = thumbHtml.includes('thumb-half') ? 'model-card dual-thumb' : 'model-card';
+        card.innerHTML = `
+          <button class="delete-btn" data-name="${m.name}">Delete</button>
           <div class="thumb-container">${thumbHtml}</div>
           <div class="info"><h3>${m.name}</h3><p>${m.endpoints.length} sources</p></div>`;
-        card.addEventListener('click',()=>openGallery(m));
+        // click on card opens gallery (unless clicking delete)
+        card.addEventListener('click', e => {
+          if (e.target.closest('.delete-btn')) return;
+          openGallery(m);
+        });
+        // delete-button handler
+        card.querySelector('.delete-btn').addEventListener('click', async e => {
+          e.stopPropagation();
+          const name = e.currentTarget.dataset.name;
+          if (!confirm(`Delete model “${name}”?`)) return;
+          const res = await API(`/api/models/${encodeURIComponent(name)}`, { method:'DELETE' });
+          if (res.status === 204){
+            results = results.filter(x => x.name !== name);
+            localStorage.setItem('n3xus_results', JSON.stringify(results));
+            renderModels(results);
+            renderJPG5(results);
+          } else {
+            const text = await res.text();
+            alert(`Failed to delete ${name}: ${text}`);
+          }
+        });
         modelsGrid.appendChild(card);
       });
     }
@@ -1117,6 +1180,27 @@
       }catch(e){ console.error(e); alert('Error processing ZIP.'); }
     }
     document.getElementById('new-model-zip').addEventListener('change', uploadNewModel);
+    // Delete Model
+    document.getElementById('delete-model-btn').onclick = async () => {
+      const name = document.getElementById('delete-model-name').value.trim();
+      if (!name) return alert('Enter a model name to delete.');
+      const res = await API(`/api/models/${encodeURIComponent(name)}`, {
+        method: 'DELETE'
+      });
+      if (res.status === 204) {
+        // Update front-end state
+        results = results.filter(m => m.name !== name);
+        localStorage.setItem('n3xus_results', JSON.stringify(results));
+        renderModels(results);
+        renderJPG5(results);
+        alert(`Model “${name}” deleted.`);
+      } else if (res.status === 404) {
+        alert(`Model “${name}” not found.`);
+      } else {
+        const text = await res.text();
+        alert(`Failed to delete: ${text}`);
+      }
+    };
   </script>
 </body>
 </html>
