@@ -6,3 +6,4 @@ pydantic
 python-jose
 passlib
 websockets
+jinja2
