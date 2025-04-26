@@ -223,7 +223,6 @@ async def delete_model(model_name: str, current_user: str = Depends(get_current_
     save_models(remaining)
     return
 
-
 def parse_links_and_titles(page_content, pattern, title_class):
     soup = BeautifulSoup(page_content, 'html.parser')
     links = [
