@@ -7,3 +7,4 @@ python-jose
 passlib
 websockets
 jinja2
+python-multipart
