@@ -717,28 +717,31 @@
       }
     });
 
-    // All endpoints…
+    <!-- All endpoints… -->
     const endpoints = [
-      { name:'Erome Gallery',   url:q=>`/api/erome-gallery?query=${q}`,       type:'gallery' },
-      { name:'Erome Albums',    url:q=>`/api/erome-albums?username=${q}`,     type:'albums'  },
-      { name:'Bunkr Gallery',   url:q=>`/api/bunkr-gallery?query=${q}`,       type:'gallery' },
-      { name:'Bunkr Albums',    url:q=>`/api/bunkr-albums?query=${q}`,        type:'albums'  },
-      { name:'NotFans',         url:q=>`/api/notfans?search_term=${q}`,       type:'urls',   key:['urls','titles'] },
-      { name:'Influencers',     url:q=>`/api/influencers?term=${q}`,          type:'urls',   key:['urls','titles'] },
-      { name:'Thothub',         url:q=>`/api/thothub?term=${q}`,              type:'urls',   key:['urls','titles'] },
-      { name:'DirtyShip',       url:q=>`/api/dirtyship?term=${q}`,            type:'urls',   key:['urls','titles'] },
-      { name:'PimpBunny',       url:q=>`/api/pimpbunny?term=${q}`,            type:'urls',   key:['urls','titles'] },
-      { name:'LeakedZone',      url:q=>`/api/leakedzone?term=${q}`,           type:'urls',   key:['urls','titles'] },
-      { name:'FanslyLeaked',    url:q=>`/api/fanslyleaked?term=${q}`,         type:'urls',   key:['urls','titles'] },
-      { name:'GotAnyNudes',     url:q=>`/api/gotanynudes?term=${q}`,          type:'urls',   key:['urls','titles'] },
-      { name:'NSFW247',         url:q=>`/api/nsfw247?term=${q}`,             type:'urls',   key:['urls','titles'] },
-      { name:'HornySimp',       url:q=>`/api/hornysimp?term=${q}`,           type:'urls',   key:['urls','titles'] },
-      { name:'Porntn',          url:q=>`/api/porntn?term=${q}`,              type:'urls',   key:['urls','titles'] },
-      { name:'xxBrits',         url:q=>`/api/xxbrits?term=${q}`,             type:'urls',   key:['urls','titles'] },
-      { name:'BitchesGirls',    url:q=>`/api/bitchesgirls?term=${q}`,        type:'urls',   key:['urls','titles'] },
-      { name:'ThotsLife',       url:q=>`/api/thotslife?term=${q}`,           type:'urls',   key:['urls','titles'] },
-      { name:'Fapello Gallery', url:q=>`/api/fapello-gallery?album_url=${q}`,type:'gallery' },
-      { name:'JPG5 Gallery',    url:q=>`/api/jpg5-gallery?album_url=${q}`,    type:'gallery' }
+      { name:'Erome Gallery',     url: q => `/api/erome-gallery?query=${q}`,          type:'gallery' },
+      { name:'Erome Albums',      url: q => `/api/erome-albums?username=${q}`,      type:'albums'  },
+      { name:'Bunkr Gallery',     url: q => `/api/bunkr-gallery?query=${q}`,          type:'gallery' },
+      { name:'Bunkr Albums',      url: q => `/api/bunkr-albums?query=${q}`,          type:'albums'  },
+      { name:'NotFans',           url: q => `/api/notfans?search_term=${q}`,         type:'urls',   key:['urls','titles'] },
+      { name:'Influencers',       url: q => `/api/influencers?term=${q}`,            type:'urls',   key:['urls','titles'] },
+      { name:'Thothub',           url: q => `/api/thothub?term=${q}`,                type:'urls',   key:['urls','titles'] },
+      { name:'DirtyShip',         url: q => `/api/dirtyship?term=${q}`,              type:'urls',   key:['urls','titles'] },
+      { name:'PimpBunny',         url: q => `/api/pimpbunny?term=${q}`,              type:'urls',   key:['urls','titles'] },
+      { name:'LeakedZone',        url: q => `/api/leakedzone?term=${q}`,             type:'urls',   key:['urls','titles'] },
+      { name:'FanslyLeaked',      url: q => `/api/fanslyleaked?term=${q}`,           type:'urls',   key:['urls','titles'] },
+      { name:'GotAnyNudes',       url: q => `/api/gotanynudes?term=${q}`,            type:'urls',   key:['urls','titles'] },
+      { name:'NSFW247',           url: q => `/api/nsfw247?term=${q}`,               type:'urls',   key:['urls','titles'] },
+      { name:'HornySimp',         url: q => `/api/hornysimp?term=${q}`,             type:'urls',   key:['urls','titles'] },
+      { name:'Porntn',            url: q => `/api/porntn?term=${q}`,                type:'urls',   key:['urls','titles'] },
+      { name:'xxBrits',           url: q => `/api/xxbrits?term=${q}`,               type:'urls',   key:['urls','titles'] },
+      { name:'BitchesGirls',      url: q => `/api/bitchesgirls?term=${q}`,          type:'urls',   key:['urls','titles'] },
+      { name:'ThotsLife',         url: q => `/api/thotslife?term=${q}`,             type:'urls',   key:['urls','titles'] },
+      { name:'Fapello Gallery',   url: q => `/api/fapello-gallery?album_url=${q}`,  type:'gallery' },
+      { name:'JPG5 Gallery',      url: q => `/api/jpg5-gallery?album_url=${q}`,      type:'gallery' },
+      { name:'PornXP Videos',     url: q => `/api/pornxp-videos?query=${q}`,         type:'urls',   key:['urls','titles'] },
+      { name:'FullPorner Videos', url: q => `/api/fullporner-videos?query=${q}`,    type:'urls',   key:['urls','titles'] },
+      { name:'HQPorner Videos',   url: q => `/api/hqporner-videos?query=${q}`,       type:'urls',   key:['urls','titles'] }
     ];
 
     // DOM refs
