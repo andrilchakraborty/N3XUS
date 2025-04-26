@@ -4,13 +4,12 @@ import json
 import asyncio
 import aiohttp
 import uvicorn
+import secrets
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Union, Dict, Tuple
 from urllib.parse import urljoin
-from fastapi import Depends
-from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body, status
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Body, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -18,8 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
-
-
+from bs4 import BeautifulSoup
 
 # ─── Path setup ───────────────────────────────────────────────────────────────
 BASE_DIR      = Path(__file__).parent
@@ -130,14 +128,13 @@ def save_models(models: List[dict]):
 async def root(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
-# ---- Invite Codes Endpoints ----
+# ---- Invite Codes Endpoints (no auth required) ----
 @app.post("/api/invite-code", status_code=201)
-async def generate_invite_code(current_user: str = Depends(get_current_user)):
+async def generate_invite_code():
     """
-    Generate a new invite code (admin only).
+    Generate a new invite code (public).
     """
     invites = load_json(INVITES_FILE, {})
-    # create a URL-safe token of length ~12
     code = secrets.token_urlsafe(8)
     invites[code] = False    # False == unused
     save_json(INVITES_FILE, invites)
@@ -149,18 +146,15 @@ async def register(data: RegisterIn):
     """
     Register a new user *only* if they supply a valid, unused invite code.
     """
-    # load and validate invite
     invites = load_json(INVITES_FILE, {})
     if data.invite_code not in invites:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid invite code")
     if invites[data.invite_code] is True:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invite code already used")
 
-    # mark invite used
     invites[data.invite_code] = True
     save_json(INVITES_FILE, invites)
 
-    # now create user
     users = load_json(USERS_FILE, {})
     if data.username in users:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Username already registered")
@@ -224,8 +218,9 @@ async def delete_model(model_name: str, current_user: str = Depends(get_current_
     remaining = [m for m in models if m.get("name") != model_name]
     if len(remaining) == len(models):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
-    save_models(remaining)
+    save_json(MODELS_FILE, remaining)
     return
+
 
 
 def parse_links_and_titles(page_content, pattern, title_class):
