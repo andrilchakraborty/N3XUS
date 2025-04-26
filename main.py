@@ -1,16 +1,14 @@
 import os
 import re
 import json
+import secrets
 import asyncio
 import aiohttp
 import uvicorn
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Union, Dict, Tuple
-from urllib.parse import urljoin
-from fastapi import Depends
-from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body, status
+from typing import List, Dict
+from fastapi import FastAPI, HTTPException, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -19,12 +17,12 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
-
 # ─── Path setup ───────────────────────────────────────────────────────────────
-BASE_DIR     = Path(__file__).parent
-USERS_FILE   = BASE_DIR / "users.json"
-SERVERS_FILE = BASE_DIR / "servers.json"
-MODELS_FILE  = BASE_DIR / "models.json"
+BASE_DIR      = Path(__file__).parent
+USERS_FILE    = BASE_DIR / "users.json"
+SERVERS_FILE  = BASE_DIR / "servers.json"
+MODELS_FILE   = BASE_DIR / "models.json"
+INVITES_FILE  = BASE_DIR / "invites.json"
 
 # ─── Utility to load/save JSON ────────────────────────────────────────────────
 def load_json(path: Path, default):
@@ -39,7 +37,6 @@ def save_json(path: Path, data):
 app = FastAPI()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-# Simple visit counter middleware
 class StatsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -55,8 +52,8 @@ app.add_middleware(
 )
 
 # ─── Auth Configuration ───────────────────────────────────────────────────────
-SECRET_KEY = os.getenv("SECRET_KEY", "change_this_to_a_random_secret")
-ALGORITHM = "HS256"
+SECRET_KEY                 = os.getenv("SECRET_KEY", "change_this_to_a_random_secret")
+ALGORITHM                  = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -64,7 +61,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire    = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -76,8 +73,8 @@ def get_password_hash(password: str) -> str:
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
+        payload  = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
         if not username:
             raise JWTError()
     except JWTError:
@@ -88,22 +85,27 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
     return username
 
 # ─── Pydantic Models ─────────────────────────────────────────────────────────
+class RegisterIn(BaseModel):
+    username:   str
+    password:   str
+    invite_code: str
+
 class UserIn(BaseModel):
     username: str
     password: str
 
 class Token(BaseModel):
     access_token: str
-    token_type: str
+    token_type:   str
 
 class ServerIn(BaseModel):
-    name: str
+    name:        str
     description: str
-    url: str
-    icon: str
+    url:         str
+    icon:        str
 
 class ModelIn(BaseModel):
-    name: str
+    name:      str
     endpoints: List[dict]
 
 # ─── “Database” Helpers ───────────────────────────────────────────────────────
@@ -124,19 +126,48 @@ def save_models(models: List[dict]):
 async def root(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
+# ---- Invite Codes Endpoints ----
+@app.post("/api/invite-code", status_code=201)
+async def generate_invite_code(current_user: str = Depends(get_current_user)):
+    """
+    Generate a new invite code (admin only).
+    """
+    invites = load_json(INVITES_FILE, {})
+    # create a URL-safe token of length ~12
+    code = secrets.token_urlsafe(8)
+    invites[code] = False    # False == unused
+    save_json(INVITES_FILE, invites)
+    return {"invite_code": code}
+
 # ---- Auth Endpoints ----
 @app.post("/api/register", status_code=201)
-async def register(user: UserIn):
+async def register(data: RegisterIn):
+    """
+    Register a new user *only* if they supply a valid, unused invite code.
+    """
+    # load and validate invite
+    invites = load_json(INVITES_FILE, {})
+    if data.invite_code not in invites:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid invite code")
+    if invites[data.invite_code] is True:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invite code already used")
+
+    # mark invite used
+    invites[data.invite_code] = True
+    save_json(INVITES_FILE, invites)
+
+    # now create user
     users = load_json(USERS_FILE, {})
-    if user.username in users:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Username already registered")
-    users[user.username] = get_password_hash(user.password)
+    if data.username in users:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Username already registered")
+
+    users[data.username] = get_password_hash(data.password)
     save_json(USERS_FILE, users)
     return {"msg": "Registered"}
 
 @app.post("/api/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    users = load_json(USERS_FILE, {})
+    users  = load_json(USERS_FILE, {})
     hashed = users.get(form_data.username)
     if not hashed or not verify_password(form_data.password, hashed):
         raise HTTPException(
@@ -147,28 +178,29 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     token = create_access_token({"sub": form_data.username})
     return {"access_token": token, "token_type": "bearer"}
 
-# ---- Servers Endpoints (public) ----
+# ---- Servers Endpoints ----
 @app.get("/api/servers")
 async def get_servers():
     return load_servers()
 
-@app.delete("/api/servers/{server_name}", status_code=204)
-async def delete_server(
-    server_name: str,
-):
-    servers = load_servers()
-    remaining = [s for s in servers if s["name"] != server_name]
-    if len(remaining) == len(servers):
-        raise HTTPException(status_code=404, detail="Server not found")
-    save_servers(remaining)
-    return
-    
 @app.post("/api/servers", status_code=201)
 async def add_server(srv: ServerIn):
     servers = load_servers()
     servers.append(srv.dict())
     save_servers(servers)
     return {"msg": "Server added"}
+
+@app.delete("/api/servers/{server_name}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_server(
+    server_name: str,
+    current_user: str = Depends(get_current_user)
+):
+    servers   = load_servers()
+    remaining = [s for s in servers if s["name"] != server_name]
+    if len(remaining) == len(servers):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Server not found")
+    save_servers(remaining)
+    return
 
 # ---- Models Endpoints ----
 @app.get("/api/models", response_model=List[ModelIn])
@@ -183,11 +215,11 @@ async def add_model(m: ModelIn, current_user: str = Depends(get_current_user)):
     return {"msg": "Model added"}
 
 @app.delete("/api/models/{model_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_model(model_name: str):
-    models = load_models()
+async def delete_model(model_name: str, current_user: str = Depends(get_current_user)):
+    models    = load_models()
     remaining = [m for m in models if m.get("name") != model_name]
     if len(remaining) == len(models):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Model not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
     save_models(remaining)
     return
 
