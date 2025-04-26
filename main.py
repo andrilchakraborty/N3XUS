@@ -7,14 +7,21 @@ import urllib.parse
 import uvicorn
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import List, Union, Dict, Tuple
+from datetime import datetime, timedelta
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
 
 # ---- Global constants ----
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+SERVERS_FILE = "servers.json"
+MODELS_FILE = "models.json"
 
 # ---- FastAPI setup ----
 app = FastAPI()
@@ -25,24 +32,142 @@ class StatsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         global total_visits
         total_visits += 1
-        response = await call_next(request)
-        return response
+        return await call_next(request)
 
 app.add_middleware(StatsMiddleware)
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"]
 )
-
 templates = Jinja2Templates(directory="templates")
+
+# ---- Auth config ----
+SECRET_KEY = os.getenv("SECRET_KEY", "change_this_to_a_random_secret")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
+USERS_FILE = "users.json"
+
+def load_json(path, default):
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump(default, f)
+    with open(path, "r") as f:
+        return json.load(f)
+
+def save_json(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    to_encode.update({"exp": datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def verify_password(plain, hashed): return pwd_context.verify(plain, hashed)
+def get_password_hash(pw): return pwd_context.hash(pw)
+
+class UserIn(BaseModel):
+    username: str
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username: raise
+    except:
+        raise HTTPException(401, "Invalid authentication credentials")
+    users = load_json(USERS_FILE, {})
+    if username not in users:
+        raise HTTPException(401, "User not found")
+    return username
+
+# ---- On-disk “DB” helpers for servers & models ----
+def load_servers(): return load_json(SERVERS_FILE, [])
+def save_servers(s): save_json(SERVERS_FILE, s)
+def load_models(): return load_json(MODELS_FILE, [])
+def save_models(m): save_json(MODELS_FILE, m)
 
 # ---- Root endpoint ----
 @app.get("/")
 async def read_index(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
+
+# allow your frontend’s origin (or '*' for public)
+origins = ["*"]  # or ["https://your-railway-domain.up.railway.app"]
+
+app.add_middleware(
+  CORSMiddleware,
+  allow_origins=origins,
+  allow_credentials=True,
+  allow_methods=["*"],      # GET, POST, OPTIONS, etc.
+  allow_headers=["*"],      # Content-Type, Authorization, etc.
+)
+
+# ---- Auth endpoints ----
+@app.post("/api/register", status_code=201)
+async def register(user: UserIn):
+    users = load_json(USERS_FILE, {})
+    if user.username in users:
+        raise HTTPException(400, "Username already registered")
+    users[user.username] = get_password_hash(user.password)
+    save_json(USERS_FILE, users)
+    return {"msg": "Registered"}
+
+@app.post("/api/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    users = load_json(USERS_FILE, {})
+    hashed = users.get(form_data.username)
+    if not hashed or not verify_password(form_data.password, hashed):
+        raise HTTPException(401, "Incorrect username or password", headers={"WWW-Authenticate":"Bearer"})
+    token = create_access_token({"sub": form_data.username})
+    return {"access_token": token, "token_type": "bearer"}
+
+# ---- Global Servers API ----
+@app.get("/api/servers")
+async def get_servers(current_user: str = Depends(get_current_user)):
+    return load_servers()
+
+class ServerIn(BaseModel):
+    name: str
+    description: str
+    url: str
+    icon: str
+
+@app.post("/api/servers", status_code=201)
+async def add_server(srv: ServerIn, current_user: str = Depends(get_current_user)):
+    servers = load_servers()
+    servers.append(srv.dict())
+    save_servers(servers)
+    return {"msg":"Server added"}
+
+class ModelIn(BaseModel):
+    name: str
+    endpoints: List[dict]
+
+# 1) Public GET – no auth required here
+@app.get("/api/models", response_model=List[ModelIn])
+async def get_models_public():
+    return load_models()
+
+# 2) (Optional) If you still want only authenticated users to add new models,
+#    leave the Depends(get_current_user) here. Otherwise, remove it to make POST public too.
+@app.post("/api/models", status_code=201)
+async def add_model(
+    m: ModelIn,
+    current_user: str = Depends(get_current_user)    # ← remove this line to make POST public
+):
+    models = load_models()
+    models.append(m.dict())
+    save_models(models)
+    return {"msg":"Model added"}
+
 
 def parse_links_and_titles(page_content, pattern, title_class):
     soup = BeautifulSoup(page_content, 'html.parser')
