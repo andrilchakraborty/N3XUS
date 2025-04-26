@@ -1,14 +1,16 @@
 import os
 import re
 import json
-import secrets
 import asyncio
 import aiohttp
 import uvicorn
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Union, Dict, Tuple
-from fastapi import FastAPI, HTTPException, Request, Depends, status
+from urllib.parse import urljoin
+from fastapi import Depends
+from bs4 import BeautifulSoup
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -16,7 +18,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
-import websockets
+
+
+
 # ─── Path setup ───────────────────────────────────────────────────────────────
 BASE_DIR      = Path(__file__).parent
 USERS_FILE    = BASE_DIR / "users.json"
@@ -222,6 +226,7 @@ async def delete_model(model_name: str, current_user: str = Depends(get_current_
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
     save_models(remaining)
     return
+
 
 def parse_links_and_titles(page_content, pattern, title_class):
     soup = BeautifulSoup(page_content, 'html.parser')
@@ -1208,32 +1213,6 @@ async def get_bitchesgirls(term: str):
 async def get_thotslife(term: str):
     urls, titles = await fetch_thotslife(term)
     return {"urls": urls, "titles": titles}
-
-# ---- Stats & WebSocket ----
-@app.get("/api/stats")
-async def get_stats():
-    return {"totalVisits": total_visits, "onlineUsers": len(active_connections)}
-
-async def broadcast_stats():
-    data = json.dumps({"totalVisits": total_visits, "onlineUsers": len(active_connections)})
-    for ws in list(active_connections):
-        try:
-            await ws.send_text(data)
-        except:
-            active_connections.discard(ws)
-
-@app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-    await ws.accept()
-    active_connections.add(ws)
-    await broadcast_stats()
-    try:
-        while True:
-            await ws.receive_text()
-            await broadcast_stats()
-    except WebSocketDisconnect:
-        active_connections.discard(ws)
-        await broadcast_stats()
 
 # ---- Run ----
 def start():
