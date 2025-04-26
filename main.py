@@ -16,7 +16,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
-
+import websockets
 # ─── Path setup ───────────────────────────────────────────────────────────────
 BASE_DIR      = Path(__file__).parent
 USERS_FILE    = BASE_DIR / "users.json"
