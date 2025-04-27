@@ -36,11 +36,18 @@ SERVERS_FILE  = BASE_DIR / "servers.json"
 MODELS_FILE   = BASE_DIR / "models.json"
 INVITES_FILE  = BASE_DIR / "invites.json"
 
-# ─── Utility to load/save JSON ────────────────────────────────────────────────
 def load_json(path: Path, default):
     if not path.exists():
         path.write_text(json.dumps(default, indent=2))
-    return json.loads(path.read_text())
+    text = path.read_text().strip()
+    if not text:
+        path.write_text(json.dumps(default, indent=2))
+        return default
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        path.write_text(json.dumps(default, indent=2))
+        return default
 
 def save_json(path: Path, data):
     path.write_text(json.dumps(data, indent=2))
@@ -138,14 +145,14 @@ def save_models(models: List[dict]):
 async def root(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
-# ---- Invite Codes Endpoints ----
+
+
 @app.post("/api/invite-code", status_code=201)
 async def generate_invite_code():
     """
-    Generate a new invite code.
+    Generate a new invite code — now public (no auth required).
     """
     invites = load_json(INVITES_FILE, {})
-    # create a URL-safe token of length ~12
     code = secrets.token_urlsafe(8)
     invites[code] = False    # False == unused
     save_json(INVITES_FILE, invites)
