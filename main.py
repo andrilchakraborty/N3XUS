@@ -138,16 +138,11 @@ def save_models(models: List[dict]):
 async def root(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
-# ---- Invite Codes Endpoints ----
 @app.post("/api/invite-code", status_code=201)
 async def generate_invite_code():
-    """
-    Generate a new invite code (admin only).
-    """
     invites = load_json(INVITES_FILE, {})
-    # create a URL-safe token of length ~12
     code = secrets.token_urlsafe(8)
-    invites[code] = False    # False == unused
+    invites[code] = False
     save_json(INVITES_FILE, invites)
     return {"invite_code": code}
 
