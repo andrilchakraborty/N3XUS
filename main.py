@@ -24,6 +24,12 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 from urllib.parse import quote, urljoin
 
+# add a desktop‑style UA so fullporner doesn’t block us:
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/114.0.0.0 Safari/537.36"
+}
 # ─── Path setup ───────────────────────────────────────────────────────────────
 BASE_DIR      = Path(__file__).parent
 USERS_FILE    = BASE_DIR / "users.json"
@@ -44,6 +50,12 @@ def save_json(path: Path, data):
 app = FastAPI()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+class StatsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        return response
+
+app.add_middleware(StatsMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,18 +64,76 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── Auth Configuration ───────────────────────────────────────────────────────
+SECRET_KEY                 = os.getenv("SECRET_KEY", "change_this_to_a_random_secret")
+ALGORITHM                  = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    expire    = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
+    try:
+        payload  = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            raise JWTError()
+    except JWTError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid authentication credentials")
+    users = load_json(USERS_FILE, {})
+    if username not in users:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    return username
+
+# ─── Pydantic Models ─────────────────────────────────────────────────────────
+class RegisterIn(BaseModel):
+    username:   str
+    password:   str
+    invite_code: str
+
+class UserIn(BaseModel):
+    username: str
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type:   str
+
+class ServerIn(BaseModel):
+    name:        str
+    description: str
+    url:         str
+    icon:        str
+
+class ModelIn(BaseModel):
+    name:      str
+    endpoints: List[dict]
+
 # ─── “Database” Helpers ───────────────────────────────────────────────────────
-def load_servers() -> List[Dict]:
+def load_servers() -> List[dict]:
     return load_json(SERVERS_FILE, [])
 
-def save_servers(servers: List[Dict]):
+def save_servers(servers: List[dict]):
     save_json(SERVERS_FILE, servers)
 
-def load_models() -> List[Dict]:
+def load_models() -> List[dict]:
     return load_json(MODELS_FILE, [])
 
-def save_models(models: List[Dict]):
+def save_models(models: List[dict]):
     save_json(MODELS_FILE, models)
+
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 @app.get("/")
