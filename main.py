@@ -138,11 +138,16 @@ def save_models(models: List[dict]):
 async def root(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
+# ---- Invite Codes Endpoints ----
 @app.post("/api/invite-code", status_code=201)
-async def generate_invite_code():
+async def generate_invite_code(current_user: str = Depends(get_current_user)):
+    """
+    Generate a new invite code (admin only).
+    """
     invites = load_json(INVITES_FILE, {})
+    # create a URL-safe token of length ~12
     code = secrets.token_urlsafe(8)
-    invites[code] = False
+    invites[code] = False    # False == unused
     save_json(INVITES_FILE, invites)
     return {"invite_code": code}
 
@@ -198,14 +203,16 @@ async def add_server(srv: ServerIn):
     return {"msg": "Server added"}
 
 @app.delete("/api/servers/{server_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_server(server_name: str):
-    servers = load_servers()
+async def delete_server(
+    server_name: str,
+    current_user: str = Depends(get_current_user)
+):
+    servers   = load_servers()
     remaining = [s for s in servers if s["name"] != server_name]
     if len(remaining) == len(servers):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Server not found")
     save_servers(remaining)
     return
-
 
 # ---- Models Endpoints ----
 @app.get("/api/models", response_model=List[ModelIn])
@@ -213,20 +220,21 @@ async def get_models():
     return load_models()
 
 @app.post("/api/models", status_code=201)
-async def add_model(m: ModelIn):
+async def add_model(m: ModelIn, current_user: str = Depends(get_current_user)):
     models = load_models()
     models.append(m.dict())
     save_models(models)
     return {"msg": "Model added"}
-    
+
 @app.delete("/api/models/{model_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_model(model_name: str):
+async def delete_model(model_name: str, current_user: str = Depends(get_current_user)):
     models    = load_models()
     remaining = [m for m in models if m.get("name") != model_name]
     if len(remaining) == len(models):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
     save_models(remaining)
     return
+
 
 # ─── FullPorner: single‐page fetch + detect last page ────────────────────────
 async def fetch_fullporner_page(session: ClientSession, term: str, page: int):
