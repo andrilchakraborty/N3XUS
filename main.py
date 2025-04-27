@@ -225,20 +225,19 @@ async def get_models():
     return load_models()
 
 @app.post("/api/models", status_code=201)
-async def add_model(m: ModelIn, current_user: str = Depends(get_current_user)):
+async def add_model(m: ModelIn):
     models = load_models()
     models.append(m.dict())
     save_models(models)
     return {"msg": "Model added"}
 
 @app.delete("/api/models/{model_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_model(model_name: str, current_user: str = Depends(get_current_user)):
-    models    = load_models()
+async def delete_model(model_name: str):
+    models = load_models()
     remaining = [m for m in models if m.get("name") != model_name]
     if len(remaining) == len(models):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
     save_models(remaining)
-    return
 
 # ─── FullPorner: single‐page fetch + detect last page ────────────────────────
 async def fetch_fullporner_page(session: ClientSession, term: str, page: int):
