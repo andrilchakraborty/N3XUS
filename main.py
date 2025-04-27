@@ -220,7 +220,7 @@ async def get_models():
     return load_models()
 
 @app.post("/api/models", status_code=201)
-async def add_model(m: ModelIn, current_user: str = Depends(get_current_user)):
+async def add_model(m: ModelIn):
     models = load_models()
     models.append(m.dict())
     save_models(models)
