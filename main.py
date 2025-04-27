@@ -87,42 +87,44 @@ async def generate_invite_code():
         print("❌ generate_invite_code error:", repr(e))
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-# ---- Auth Endpoints (unchanged) ----
+# ---- Auth Endpoints ----
 @app.post("/api/register", status_code=201)
-async def register(data: Dict = Body(...)):
+async def register(data: RegisterIn):
     """
     Register a new user *only* if they supply a valid, unused invite code.
     """
     # load and validate invite
     invites = load_json(INVITES_FILE, {})
-    if data.get("invite_code") not in invites:
+    if data.invite_code not in invites:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid invite code")
-    if invites[data["invite_code"]] is True:
+    if invites[data.invite_code] is True:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invite code already used")
 
     # mark invite used
-    invites[data["invite_code"]] = True
+    invites[data.invite_code] = True
     save_json(INVITES_FILE, invites)
 
     # now create user
     users = load_json(USERS_FILE, {})
-    if data.get("username") in users:
+    if data.username in users:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Username already registered")
 
-    # Simply store plaintext passwords (no auth needed for endpoints)
-    users[data["username"]] = data.get("password")
+    users[data.username] = get_password_hash(data.password)
     save_json(USERS_FILE, users)
     return {"msg": "Registered"}
 
-@app.post("/api/login")
-async def login(data: Dict = Body(...)):
-    """
-    Very simple login that just checks username/password and returns success.
-    """
-    users = load_json(USERS_FILE, {})
-    if not users.get(data.get("username")) or users[data["username"]] != data.get("password"):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
-    return {"msg": "Logged in"}
+@app.post("/api/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    users  = load_json(USERS_FILE, {})
+    hashed = users.get(form_data.username)
+    if not hashed or not verify_password(form_data.password, hashed):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    token = create_access_token({"sub": form_data.username})
+    return {"access_token": token, "token_type": "bearer"}
 
 # ---- Servers Endpoints ----
 @app.get("/api/servers")
@@ -130,35 +132,38 @@ async def get_servers():
     return load_servers()
 
 @app.post("/api/servers", status_code=201)
-async def add_server(srv: Dict = Body(...)):
+async def add_server(srv: ServerIn):
     servers = load_servers()
-    servers.append(srv)
+    servers.append(srv.dict())
     save_servers(servers)
     return {"msg": "Server added"}
 
 @app.delete("/api/servers/{server_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_server(server_name: str):
+async def delete_server(
+    server_name: str,
+    current_user: str = Depends(get_current_user)
+):
     servers   = load_servers()
-    remaining = [s for s in servers if s.get("name") != server_name]
+    remaining = [s for s in servers if s["name"] != server_name]
     if len(remaining) == len(servers):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Server not found")
     save_servers(remaining)
     return
 
 # ---- Models Endpoints ----
-@app.get("/api/models")
+@app.get("/api/models", response_model=List[ModelIn])
 async def get_models():
     return load_models()
 
 @app.post("/api/models", status_code=201)
-async def add_model(m: Dict = Body(...)):
+async def add_model(m: ModelIn, current_user: str = Depends(get_current_user)):
     models = load_models()
-    models.append(m)
+    models.append(m.dict())
     save_models(models)
     return {"msg": "Model added"}
 
 @app.delete("/api/models/{model_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_model(model_name: str):
+async def delete_model(model_name: str, current_user: str = Depends(get_current_user)):
     models    = load_models()
     remaining = [m for m in models if m.get("name") != model_name]
     if len(remaining) == len(models):
