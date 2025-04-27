@@ -1,21 +1,27 @@
 import os
 import re
 import json
-import secrets
 import asyncio
 import aiohttp
 import uvicorn
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Dict
-from fastapi import FastAPI, HTTPException, Request, Depends, status
+from typing import List, Union, Dict, Tuple
+from urllib.parse import urljoin
+from fastapi import Depends
+from bs4 import BeautifulSoup
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
+from aiohttp import ClientSession
+from urllib.parse import quote_plus, urlencode
+import urllib.parse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from starlette.middleware.base import BaseHTTPMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
+from urllib.parse import quote, urljoin
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
