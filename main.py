@@ -3,6 +3,7 @@ import re
 import json
 import asyncio
 import aiohttp
+import secrets
 import uvicorn
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -69,18 +70,22 @@ def save_models(models: List[Dict]):
 async def root(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
-# ---- Invite Codes Endpoints (NO AUTH ANYMORE) ----
+# ---- Invite Codes (no auth) ----
 @app.post("/api/invite-code", status_code=201)
 async def generate_invite_code():
     """
-    Generate a new invite code (public).
+    Public: generate a new invite code.
     """
-    invites = load_json(INVITES_FILE, {})
-    # create a URL-safe token of length ~12
-    code = secrets.token_urlsafe(8)
-    invites[code] = False    # False == unused
-    save_json(INVITES_FILE, invites)
-    return {"invite_code": code}
+    try:
+        invites = load_json(INVITES_FILE, {})
+        code = secrets.token_urlsafe(8)
+        invites[code] = False
+        save_json(INVITES_FILE, invites)
+        return {"invite_code": code}
+    except Exception as e:
+        # this will show up in your server logs
+        print("❌ generate_invite_code error:", repr(e))
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 # ---- Auth Endpoints (unchanged) ----
 @app.post("/api/register", status_code=201)
