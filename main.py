@@ -1,29 +1,21 @@
 import os
 import re
 import json
+import secrets
 import asyncio
 import aiohttp
 import uvicorn
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Union, Dict, Tuple
-from urllib.parse import urljoin
-from fastapi import Depends
-from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, Depends, Body, status
+from typing import List, Dict
+from fastapi import FastAPI, HTTPException, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
-from aiohttp import ClientSession
-from urllib.parse import quote_plus, urlencode
-import urllib.parse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from starlette.middleware.base import BaseHTTPMiddleware
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
-from urllib.parse import quote, urljoin
-
-# add a desktop‑style UA so fullporner doesn’t block us:
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -36,18 +28,11 @@ SERVERS_FILE  = BASE_DIR / "servers.json"
 MODELS_FILE   = BASE_DIR / "models.json"
 INVITES_FILE  = BASE_DIR / "invites.json"
 
+# ─── Utility to load/save JSON ────────────────────────────────────────────────
 def load_json(path: Path, default):
     if not path.exists():
         path.write_text(json.dumps(default, indent=2))
-    text = path.read_text().strip()
-    if not text:
-        path.write_text(json.dumps(default, indent=2))
-        return default
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        path.write_text(json.dumps(default, indent=2))
-        return default
+    return json.loads(path.read_text())
 
 def save_json(path: Path, data):
     path.write_text(json.dumps(data, indent=2))
@@ -145,14 +130,14 @@ def save_models(models: List[dict]):
 async def root(request: Request):
     return templates.TemplateResponse("ok.html", {"request": request})
 
-
-
+# ---- Invite Codes Endpoints ----
 @app.post("/api/invite-code", status_code=201)
-async def generate_invite_code():
+async def generate_invite_code(current_user: str = Depends(get_current_user)):
     """
-    Generate a new invite code — now public (no auth required).
+    Generate a new invite code (admin only).
     """
     invites = load_json(INVITES_FILE, {})
+    # create a URL-safe token of length ~12
     code = secrets.token_urlsafe(8)
     invites[code] = False    # False == unused
     save_json(INVITES_FILE, invites)
@@ -241,7 +226,6 @@ async def delete_model(model_name: str, current_user: str = Depends(get_current_
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
     save_models(remaining)
     return
-
 
 # ─── FullPorner: single‐page fetch + detect last page ────────────────────────
 async def fetch_fullporner_page(session: ClientSession, term: str, page: int):
