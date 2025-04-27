@@ -198,16 +198,14 @@ async def add_server(srv: ServerIn):
     return {"msg": "Server added"}
 
 @app.delete("/api/servers/{server_name}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_server(
-    server_name: str,
-    current_user: str = Depends(get_current_user)
-):
-    servers   = load_servers()
+async def delete_server(server_name: str):
+    servers = load_servers()
     remaining = [s for s in servers if s["name"] != server_name]
     if len(remaining) == len(servers):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Server not found")
     save_servers(remaining)
     return
+
 
 # ---- Models Endpoints ----
 @app.get("/api/models", response_model=List[ModelIn])
@@ -220,7 +218,7 @@ async def add_model(m: ModelIn):
     models.append(m.dict())
     save_models(models)
     return {"msg": "Model added"}
-
+    
 @app.delete("/api/models/{model_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_model(model_name: str):
     models    = load_models()
