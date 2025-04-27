@@ -211,7 +211,6 @@ async def add_server(srv: ServerIn):
 @app.delete("/api/servers/{server_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_server(
     server_name: str,
-    current_user: str = Depends(get_current_user)
 ):
     servers   = load_servers()
     remaining = [s for s in servers if s["name"] != server_name]
