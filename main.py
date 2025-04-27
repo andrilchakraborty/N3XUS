@@ -140,9 +140,9 @@ async def root(request: Request):
 
 # ---- Invite Codes Endpoints ----
 @app.post("/api/invite-code", status_code=201)
-async def generate_invite_code(current_user: str = Depends(get_current_user)):
+async def generate_invite_code():
     """
-    Generate a new invite code (admin only).
+    Generate a new invite code.
     """
     invites = load_json(INVITES_FILE, {})
     # create a URL-safe token of length ~12
