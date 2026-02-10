@@ -23,7 +23,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from urllib.parse import quote, urljoin
-
+import unicodedata
 # add a desktop‑style UA so fullporner doesn’t block us:
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -64,11 +64,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Auth Configuration ───────────────────────────────────────────────────────
 SECRET_KEY                 = os.getenv("SECRET_KEY", "change_this_to_a_random_secret")
 ALGORITHM                  = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1000000
 
+# keep bcrypt or swap to argon2 if you want no 72-byte limit (requires installing argon2)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
@@ -78,11 +78,42 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+def _normalize_and_truncate_password(password: str, max_bytes: int = 72) -> str:
+    """
+    Normalize (NFC) and safely truncate the password to <= max_bytes UTF-8 bytes
+    without breaking multi-byte characters. Returns a valid UTF-8 string.
+    """
+    if password is None:
+        return ""
+    norm = unicodedata.normalize("NFC", password)
+    b = norm.encode("utf-8")
+    if len(b) <= max_bytes:
+        return norm
+
+    # Truncate bytes and back off until we have valid UTF-8
+    truncated = b[:max_bytes]
+    while True:
+        try:
+            return truncated.decode("utf-8")
+        except UnicodeDecodeError:
+            truncated = truncated[:-1]
+            if not truncated:
+                return ""
+
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    """
+    Verify by normalizing + truncating the incoming plain password the same way
+    we did when hashing it.
+    """
+    safe_plain = _normalize_and_truncate_password(plain)
+    return pwd_context.verify(safe_plain, hashed)
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    """
+    Hash the normalized + truncated password.
+    """
+    safe = _normalize_and_truncate_password(password)
+    return pwd_context.hash(safe)
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
     try:
