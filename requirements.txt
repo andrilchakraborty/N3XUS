@@ -9,3 +9,4 @@ websockets
 jinja2
 python-multipart
 bcrypt
+argon2_cffi
