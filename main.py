@@ -24,6 +24,12 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 from urllib.parse import quote, urljoin
 import unicodedata
+from datetime import datetime, timedelta
+from passlib.context import CryptContext
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from fastapi import Depends, HTTPException, status
+
 # add a desktop‑style UA so fullporner doesn’t block us:
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -68,8 +74,9 @@ SECRET_KEY                 = os.getenv("SECRET_KEY", "change_this_to_a_random_se
 ALGORITHM                  = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1000000
 
-# keep bcrypt or swap to argon2 if you want no 72-byte limit (requires installing argon2)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use Argon2 as the preferred hashing scheme. Keep bcrypt second so existing hashes verify.
+# New hashes will use Argon2 (first scheme in the list).
+pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
@@ -78,41 +85,32 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def _normalize_and_truncate_password(password: str, max_bytes: int = 72) -> str:
+def _normalize_password(password: str) -> str:
     """
-    Normalize (NFC) and safely truncate the password to <= max_bytes UTF-8 bytes
-    without breaking multi-byte characters. Returns a valid UTF-8 string.
+    Normalize UTF-8 (NFC). Do NOT truncate — Argon2 supports arbitrary lengths.
     """
     if password is None:
         return ""
-    norm = unicodedata.normalize("NFC", password)
-    b = norm.encode("utf-8")
-    if len(b) <= max_bytes:
-        return norm
-
-    # Truncate bytes and back off until we have valid UTF-8
-    truncated = b[:max_bytes]
-    while True:
-        try:
-            return truncated.decode("utf-8")
-        except UnicodeDecodeError:
-            truncated = truncated[:-1]
-            if not truncated:
-                return ""
+    return unicodedata.normalize("NFC", password)
 
 def verify_password(plain: str, hashed: str) -> bool:
     """
-    Verify by normalizing + truncating the incoming plain password the same way
-    we did when hashing it.
+    Verify incoming plain password against stored hash (argon2 or legacy bcrypt).
+    Returns True/False. Any verification exceptions return False.
     """
-    safe_plain = _normalize_and_truncate_password(plain)
-    return pwd_context.verify(safe_plain, hashed)
+    try:
+        safe_plain = _normalize_password(plain)
+        return pwd_context.verify(safe_plain, hashed)
+    except Exception as e:
+        # If verification fails (bad hash format, etc.), treat as False.
+        # (You can log `e` server-side if you want.)
+        return False
 
 def get_password_hash(password: str) -> str:
     """
-    Hash the normalized + truncated password.
+    Hash a password using the preferred scheme (argon2).
     """
-    safe = _normalize_and_truncate_password(password)
+    safe = _normalize_password(password)
     return pwd_context.hash(safe)
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
@@ -224,8 +222,22 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
             "Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"}
         )
+
+    # If the stored hash is using an older scheme (e.g., bcrypt) or parameters changed,
+    # passlib can tell us whether it needs update. If so, re-hash with the preferred scheme (argon2).
+    try:
+        if pwd_context.needs_update(hashed):
+            # Re-hash with current preferred scheme (argon2) and save
+            new_hash = get_password_hash(form_data.password)
+            users[form_data.username] = new_hash
+            save_json(USERS_FILE, users)
+    except Exception:
+        # If re-hash fails for any reason, we still continue and return token.
+        pass
+
     token = create_access_token({"sub": form_data.username})
     return {"access_token": token, "token_type": "bearer"}
+
 
 # ---- Servers Endpoints ----
 @app.get("/api/servers")
